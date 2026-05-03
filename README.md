@@ -1,6 +1,24 @@
-# 🎩 Alfred
+<p align="center">
+  <img src="docs/assets/logo-256.png" alt="Alfred" width="160">
+</p>
 
-Self-hosted Mac assistant powered by [Claude Code](https://claude.com/claude-code). Talk to your Mac from Telegram, Discord, Slack, iMessage, or a local browser chat — same commands, same memory, anywhere.
+<h1 align="center">Alfred</h1>
+
+<p align="center">
+  <em>The assistant who does the work and stays out of the spotlight.</em><br>
+  Self-hosted Mac assistant powered by <a href="https://claude.com/claude-code">Claude Code</a> —
+  Telegram · Discord · Slack · iMessage · Web.
+</p>
+
+---
+
+## Why "Alfred"
+
+Alfred Pennyworth is Batman's butler. He drives the car, hacks the computers, builds the gadgets, picks up the bullet wounds at 3 a.m., and gets about four lines of dialogue per movie. The character does the work; the hero gets the spotlight.
+
+That's the brief. **Alfred is the assistant — not the protagonist.** No personality theatre, no "let me think about that" filler. You ask, Alfred does, you go on with your day. The bot's name is the thesis statement.
+
+## What he does
 
 ```
 You:    take a screenshot, OCR it, and tell me what apps I have open
@@ -9,7 +27,9 @@ Alfred: 📸 [photo arrives in chat]
         Open apps: Safari, Code, Music, Terminal, Slack
 ```
 
-**Why Alfred:** wraps Claude Code's full agentic toolset (Bash, FileSystem, MCP servers, web fetch, …) and surfaces it through five chat platforms. Mac-native — Vision OCR, AppleScript app control, iMessage via `chat.db`, macOS Notification Center forwarding all built in.
+Alfred wraps the [Claude Code](https://claude.com/claude-code) CLI and surfaces it through five chat platforms with one shared brain — Telegram, Discord, Slack, iMessage, and a local browser chat. Same conversation memory wherever you address him. He inherits Claude Code's full agentic toolset (Bash, FileSystem, MCP servers, web fetch, …) so anything you can type at a terminal, you can ask Alfred to do over text.
+
+Mac-native by design: Vision OCR for photos you send him, AppleScript for app control, iMessage via `chat.db`, macOS Notification Center forwarding — all built in.
 
 > ⚠️ **Self-hosted only.** Alfred runs shell commands on the host with no sandbox. **Do not host this for other people.** Each person should run their own Alfred on their own Mac.
 

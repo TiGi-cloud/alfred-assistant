@@ -1,5 +1,9 @@
 # FAQ
 
+## Who's "Alfred"?
+
+Named after Alfred Pennyworth — Batman's butler. The character does the work and stays out of the spotlight; the brand cues the bot to do the same. Brief, useful, no theatre.
+
 ## Why another self-hosted Claude bot?
 
 Alfred is **Mac-first** and runs **through the Claude Code CLI**, not the Anthropic API.

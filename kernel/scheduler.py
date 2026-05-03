@@ -21,13 +21,12 @@ import asyncio
 import json
 import logging
 import re
-import shutil
 import sys
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 from .adapter import ChatAdapter
 from .runner import Context

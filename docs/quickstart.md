@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo-128.png" alt="Alfred" width="96">
+</p>
+
 # Quickstart
 
 Five minutes from `git clone` to "Alfred screenshotted my desktop in Telegram".

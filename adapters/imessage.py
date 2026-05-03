@@ -398,8 +398,8 @@ class iMessageAdapter(ChatAdapter):
         if keyboard and not keyboard.is_empty():
             # iMessage has no inline buttons. Render as numbered text lines.
             lines = [text, ""]
-            for i, row in enumerate(keyboard.rows):
-                for j, btn in enumerate(row):
+            for row in keyboard.rows:
+                for btn in row:
                     if btn.url:
                         lines.append(f"  • {btn.label}: {btn.url}")
                     else:

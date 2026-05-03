@@ -34,12 +34,13 @@ ENV_PATH = Path(__file__).parent / ".env"
 # ---------------------------------------------------------------------------
 # Setup HTML (single file, no external assets)
 # ---------------------------------------------------------------------------
-_SETUP_HTML = """<!doctype html>
+_SETUP_HTML_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Alfred Setup</title>
+<link rel="icon" type="image/png" href="__FAVICON__">
 <style>
   :root {
     --bg: #0e1116;
@@ -67,6 +68,8 @@ _SETUP_HTML = """<!doctype html>
     padding: 32px 24px 64px;
   }
   h1 { font-size: 28px; margin: 0 0 4px; }
+  .alfred-h1 { display: flex; align-items: center; gap: 14px; }
+  .alfred-logo { border-radius: 10px; }
   p.lede { color: var(--muted); margin: 0 0 24px; }
   .card {
     background: var(--bg-2);
@@ -148,7 +151,10 @@ _SETUP_HTML = """<!doctype html>
 </head>
 <body>
 <div class="wrap">
-  <h1>🎩 Alfred</h1>
+  <h1 class="alfred-h1">
+    <img class="alfred-logo" src="__LOGO__" alt="" width="48" height="48">
+    Alfred
+  </h1>
   <p class="lede">Set up your remote Mac assistant. This page only ever runs on your own computer; nothing is sent to the internet.</p>
 
   <form id="form">
@@ -286,6 +292,20 @@ form.addEventListener("submit", async (e) => {
 </body>
 </html>
 """
+
+
+def _render_setup_html() -> str:
+    """Bake the logo into the wizard HTML once at module load."""
+    try:
+        from kernel.branding import logo_data_url
+        favicon = logo_data_url("favicon")
+        logo = logo_data_url("128")
+    except Exception:
+        favicon, logo = "", ""
+    return _SETUP_HTML_TEMPLATE.replace("__FAVICON__", favicon).replace("__LOGO__", logo)
+
+
+_SETUP_HTML = _render_setup_html()
 
 
 # ---------------------------------------------------------------------------

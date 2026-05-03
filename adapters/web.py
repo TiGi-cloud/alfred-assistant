@@ -47,6 +47,7 @@ from kernel import (
     User,
 )
 from kernel.adapter import PathLike
+from kernel.branding import logo_data_url
 
 logger = logging.getLogger("alfred.adapters.web")
 
@@ -54,12 +55,13 @@ logger = logging.getLogger("alfred.adapters.web")
 # ---------------------------------------------------------------------------
 # Inline chat UI (single-file HTML)
 # ---------------------------------------------------------------------------
-_CHAT_HTML = """<!doctype html>
+_CHAT_HTML_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Alfred</title>
+<link rel="icon" type="image/png" href="__FAVICON__">
 <style>
   :root {
     --bg: #0e1116;
@@ -89,7 +91,11 @@ _CHAT_HTML = """<!doctype html>
     align-items: center;
     justify-content: space-between;
   }
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header h1 {
+    font-size: 16px; margin: 0; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  header .logo { border-radius: 6px; }
   header .status {
     font-size: 12px;
     color: var(--muted);
@@ -179,7 +185,7 @@ _CHAT_HTML = """<!doctype html>
 </head>
 <body>
 <header>
-  <h1>🎩 Alfred</h1>
+  <h1><img class="logo" src="__LOGO__" alt="" width="28" height="28">Alfred</h1>
   <span id="status" class="status">connecting…</span>
 </header>
 <main>
@@ -342,6 +348,18 @@ _CHAT_HTML = """<!doctype html>
 </body>
 </html>
 """
+
+
+def _render_chat_html() -> str:
+    """Bake the logo into the chat HTML once at module load."""
+    return (
+        _CHAT_HTML_TEMPLATE
+        .replace("__FAVICON__", logo_data_url("favicon"))
+        .replace("__LOGO__", logo_data_url("favicon"))
+    )
+
+
+_CHAT_HTML = _render_chat_html()
 
 
 # ---------------------------------------------------------------------------

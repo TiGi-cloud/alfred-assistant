@@ -334,15 +334,14 @@ class SlackAdapter(ChatAdapter):
         filename: Optional[str] = None,
     ) -> SentMessage:
         p = Path(path)
-        resp = await self._client.files_upload_v2(
+        await self._client.files_upload_v2(
             channel=chat_id,
             file=str(p),
             filename=filename or p.name,
             initial_comment=caption,
         )
-        # files_upload_v2 returns a list; grab the first entry's channel/ts
-        files = resp.get("files") or []
-        ts = (files[0].get("shares", {}).get("public", {}).values() or [None])
+        # files_upload_v2 doesn't return a normal message ts — synthesize an id
+        # so the caller can still pass a SentMessage handle around.
         return SentMessage(chat_id=chat_id, message_id=str(time.time()))
 
     async def send_photo(
