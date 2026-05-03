@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""
+Alfred multi-adapter entry point (work in progress).
+
+Runs Telegram and a browser-based chat side-by-side via the kernel.ChatAdapter
+interface defined in `kernel/`. Both adapters share one Dispatcher and a small
+set of demo handlers to prove the abstraction holds.
+
+This is *not* a drop-in replacement for `bot.py` yet — only a handful of demo
+commands are wired up. The legacy `bot.py` still drives the full Telegram
+feature set; `app.py` is the future home as commands are ported one by one.
+
+Usage:
+
+    # 1. .env contains TELEGRAM_BOT_TOKEN and ALLOWED_USERS (see .env.example)
+    # 2. Optionally set WEB_AUTH_TOKEN to pin a token; otherwise one is
+    #    generated and printed to stdout on startup.
+    # 3. Run:
+    python3 app.py
+
+    # 4. Browser chat appears at the printed URL; Telegram polling starts.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import secrets
+import signal
+import socket
+import sys
+from pathlib import Path
+
+# Load .env so users don't have to source it manually
+try:
+    from dotenv import load_dotenv  # type: ignore[import]
+    load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    pass  # python-dotenv is optional
+
+from adapters.telegram import TelegramAdapter
+from adapters.web import WebAdapter
+from kernel import ChatAdapter
+from kernel.runner import Context, Dispatcher
+
+logger = logging.getLogger("alfred.app")
+
+
+# ---------------------------------------------------------------------------
+# Demo handlers — these run identically across Telegram and Web adapters
+# ---------------------------------------------------------------------------
+async def cmd_ping(ctx: Context) -> None:
+    await ctx.reply("pong 🏓")
+
+
+async def cmd_whoami(ctx: Context) -> None:
+    u = ctx.user
+    lines = [
+        f"id: {u.id}",
+        f"username: @{u.username}" if u.username else "username: (none)",
+        f"display: {u.display_name or '(none)'}",
+        f"adapter: {ctx.adapter.name}",
+        f"chat: {ctx.chat_id}",
+    ]
+    await ctx.reply("\n".join(lines))
+
+
+async def cmd_screenshot(ctx: Context) -> None:
+    """Take a macOS screenshot and send it back."""
+    import tempfile
+
+    fd, path = tempfile.mkstemp(prefix="alfred-shot-", suffix=".png")
+    os.close(fd)
+    proc = await asyncio.create_subprocess_exec(
+        "screencapture", "-x", path,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, err = await proc.communicate()
+    if proc.returncode != 0:
+        await ctx.reply(f"screencapture failed: {err.decode().strip() or 'unknown'}")
+        return
+    await ctx.adapter.send_photo(ctx.chat_id, path, caption="📸")
+
+
+async def default_text(ctx: Context) -> None:
+    """Fallback for non-command text. Echoes back for now; the full Claude
+    pipeline will be wired in once the legacy `claude_runner` is decoupled
+    from python-telegram-bot."""
+    msg = ctx.message
+    if msg and msg.text:
+        await ctx.reply(
+            f"got it ({len(msg.text)} chars). "
+            "Full Claude integration is pending — try /ping, /whoami, /screenshot."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Adapter factory
+# ---------------------------------------------------------------------------
+def _parse_allowed_user_ids(raw: str) -> list[int]:
+    out: list[int] = []
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.append(int(part))
+        except ValueError:
+            logger.warning("Ignoring invalid ALLOWED_USER_IDS entry: %s", part)
+    return out
+
+
+def _build_adapters() -> list[ChatAdapter]:
+    adapters: list[ChatAdapter] = []
+
+    # Telegram (skip if no token)
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if token:
+        allowed_users = [
+            u.strip() for u in os.environ.get("ALLOWED_USERS", "").split(",") if u.strip()
+        ]
+        allowed_user_ids = _parse_allowed_user_ids(os.environ.get("ALLOWED_USER_IDS", ""))
+        if not allowed_users and not allowed_user_ids:
+            logger.warning(
+                "Telegram adapter has neither ALLOWED_USERS nor ALLOWED_USER_IDS — "
+                "the bot will accept commands from ANYONE who finds the handle."
+            )
+        adapters.append(
+            TelegramAdapter.from_token(
+                token,
+                allowed_users=allowed_users,
+                allowed_user_ids=allowed_user_ids,
+            )
+        )
+    else:
+        logger.info("TELEGRAM_BOT_TOKEN not set — Telegram adapter disabled")
+
+    # Web (always on for now; bind localhost only)
+    if os.environ.get("WEB_DISABLED", "").lower() not in ("1", "true", "yes"):
+        host = os.environ.get("WEB_HOST", "127.0.0.1")
+        port = int(os.environ.get("WEB_PORT", "8765"))
+        token = os.environ.get("WEB_AUTH_TOKEN") or secrets.token_urlsafe(24)
+        adapters.append(WebAdapter(host=host, port=port, auth_token=token))
+
+    return adapters
+
+
+# ---------------------------------------------------------------------------
+# Main loop
+# ---------------------------------------------------------------------------
+async def run() -> None:
+    adapters = _build_adapters()
+    if not adapters:
+        logger.error("No adapters configured. Set TELEGRAM_BOT_TOKEN or enable WEB.")
+        sys.exit(2)
+
+    dispatcher = Dispatcher(default_handler=default_text)
+    dispatcher.command("ping", cmd_ping)
+    dispatcher.command("whoami", cmd_whoami)
+    dispatcher.command("screenshot", cmd_screenshot)
+
+    # Start every adapter
+    for a in adapters:
+        await a.start()
+
+    # Print the web URL so users know where to click
+    for a in adapters:
+        if isinstance(a, WebAdapter):
+            print(f"\n  🎩 Web chat:   {a.url}\n")
+
+    # Run dispatcher against every adapter concurrently
+    tasks = [asyncio.create_task(dispatcher.run(a), name=f"dispatch-{a.name}") for a in adapters]
+
+    # Wait for SIGINT/SIGTERM
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except NotImplementedError:
+            # Windows doesn't support add_signal_handler
+            pass
+    await stop.wait()
+
+    logger.info("Shutting down…")
+    for t in tasks:
+        t.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    for a in adapters:
+        try:
+            await a.stop()
+        except Exception:
+            logger.exception("Error stopping adapter %s", a.name)
+
+
+def _setup_logging() -> None:
+    level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=getattr(logging, level, logging.INFO),
+        format="%(asctime)s %(levelname)-7s %(name)s — %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+
+def _check_port(host: str, port: int) -> bool:
+    """Return True if `port` is available on `host`."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def main() -> None:
+    _setup_logging()
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()
