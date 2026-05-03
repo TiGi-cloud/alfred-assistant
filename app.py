@@ -42,49 +42,13 @@ from adapters.telegram import TelegramAdapter
 from adapters.web import WebAdapter
 from kernel import ChatAdapter
 from kernel.runner import Context, Dispatcher
+import actions as alfred_actions
 
 # Discord and Slack adapters are imported lazily inside _build_adapters()
 # so missing optional dependencies (discord.py, slack-bolt) don't break
 # users who only run Telegram + Web.
 
 logger = logging.getLogger("alfred.app")
-
-
-# ---------------------------------------------------------------------------
-# Demo handlers — these run identically across Telegram and Web adapters
-# ---------------------------------------------------------------------------
-async def cmd_ping(ctx: Context) -> None:
-    await ctx.reply("pong 🏓")
-
-
-async def cmd_whoami(ctx: Context) -> None:
-    u = ctx.user
-    lines = [
-        f"id: {u.id}",
-        f"username: @{u.username}" if u.username else "username: (none)",
-        f"display: {u.display_name or '(none)'}",
-        f"adapter: {ctx.adapter.name}",
-        f"chat: {ctx.chat_id}",
-    ]
-    await ctx.reply("\n".join(lines))
-
-
-async def cmd_screenshot(ctx: Context) -> None:
-    """Take a macOS screenshot and send it back."""
-    import tempfile
-
-    fd, path = tempfile.mkstemp(prefix="alfred-shot-", suffix=".png")
-    os.close(fd)
-    proc = await asyncio.create_subprocess_exec(
-        "screencapture", "-x", path,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, err = await proc.communicate()
-    if proc.returncode != 0:
-        await ctx.reply(f"screencapture failed: {err.decode().strip() or 'unknown'}")
-        return
-    await ctx.adapter.send_photo(ctx.chat_id, path, caption="📸")
 
 
 async def default_text(ctx: Context) -> None:
@@ -95,7 +59,8 @@ async def default_text(ctx: Context) -> None:
     if msg and msg.text:
         await ctx.reply(
             f"got it ({len(msg.text)} chars). "
-            "Full Claude integration is pending — try /ping, /whoami, /screenshot."
+            "Try /help to see available commands. "
+            "Full Claude conversational integration is the next port."
         )
 
 
@@ -226,9 +191,7 @@ async def run() -> None:
         sys.exit(2)
 
     dispatcher = Dispatcher(default_handler=default_text)
-    dispatcher.command("ping", cmd_ping)
-    dispatcher.command("whoami", cmd_whoami)
-    dispatcher.command("screenshot", cmd_screenshot)
+    alfred_actions.register_all(dispatcher)
 
     # Start every adapter
     for a in adapters:

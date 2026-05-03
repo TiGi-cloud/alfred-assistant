@@ -613,6 +613,83 @@ def test_adapter_serialisation() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 9b) Platform-agnostic actions/
+# ---------------------------------------------------------------------------
+async def test_actions() -> None:
+    section("actions/ — cross-platform command handlers")
+
+    import actions
+    from kernel.runner import Dispatcher
+
+    d = Dispatcher()
+    actions.register_all(d)
+    commands = sorted(d._commands.keys())
+    expected = {
+        "apps", "battery", "camera", "clipboard", "focus", "help", "ip",
+        "ocr", "open", "paste", "ping", "processes", "record", "screenshot",
+        "search", "shortcut", "status", "tts", "uptime", "volume", "watch",
+        "whoami", "wifi",
+    }
+    expect(set(commands) == expected,
+           f"actions.register_all registers exactly {len(expected)} commands",
+           f"got {sorted(set(commands) ^ expected)}")
+
+    # Functional test: run /uptime through the dispatcher with a fake adapter.
+    from kernel import (Chat, ChatAdapter, Message, MessageKind, SentMessage,
+                        User)
+
+    captured = []
+
+    class FakeAdapter(ChatAdapter):
+        name = "test"
+        async def start(self): pass
+        async def stop(self): pass
+        async def messages(self):
+            if False:
+                yield  # pragma: no cover
+        async def callbacks(self):
+            if False:
+                yield  # pragma: no cover
+        async def send_text(self, chat_id, text, **kw):
+            captured.append(text)
+            return SentMessage(chat_id=chat_id, message_id="0")
+        async def edit_text(self, sent, text, **kw): pass
+        async def delete(self, sent): pass
+        async def send_photo(self, *a, **kw): pass
+        async def send_video(self, *a, **kw): pass
+        async def send_voice(self, *a, **kw): pass
+        async def send_document(self, *a, **kw): pass
+        async def send_typing(self, chat_id): pass
+        async def authorize(self, user): return True
+        async def download_attachment(self, att, dest=None): return Path()
+
+    fake = FakeAdapter()
+    msg = Message(id="1", chat=Chat(id="c"), user=User(id="u"),
+                  kind=MessageKind.COMMAND, text="/uptime")
+    from kernel.runner import Context
+    ctx = Context(adapter=fake, message=msg)
+    await d._dispatch_message(fake, msg)
+    expect(any("up" in t.lower() or "load" in t.lower() for t in captured) if captured else False,
+           "/uptime end-to-end through dispatcher → uptime output captured",
+           f"captured={captured}")
+
+    # /ping is platform-trivial — verify it runs
+    captured.clear()
+    msg2 = Message(id="2", chat=Chat(id="c"), user=User(id="u"),
+                   kind=MessageKind.COMMAND, text="/ping")
+    await d._dispatch_message(fake, msg2)
+    expect(captured == ["pong 🏓"], "/ping → pong 🏓", f"got {captured}")
+
+    # /help should produce a multi-line menu
+    captured.clear()
+    msg3 = Message(id="3", chat=Chat(id="c"), user=User(id="u"),
+                   kind=MessageKind.COMMAND, text="/help")
+    await d._dispatch_message(fake, msg3)
+    expect(captured and "Alfred" in captured[0] and "/screenshot" in captured[0],
+           "/help → menu mentioning Alfred and at least one command")
+
+
+# ---------------------------------------------------------------------------
 # 10) app.py entry-point smoke
 # ---------------------------------------------------------------------------
 def test_app_smoke() -> None:
@@ -652,6 +729,7 @@ async def amain() -> int:
     test_imessage_unit()
     test_applescript_syntax()
     test_adapter_serialisation()
+    await test_actions()
     test_app_smoke()
 
     print(f"\n  Summary: {GREEN}{_pass} passed{RESET}, "
