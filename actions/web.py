@@ -63,6 +63,16 @@ Automation
   /shortcut [name]     — list or run Siri Shortcuts
   /focus               — toggle Do Not Disturb (needs a Shortcut)
 
+Reminders + scheduling
+  /remind in 10 min …  — one-shot reminder
+  /timer 5 [label]     — quick timer in N minutes
+  /schedule "every day at 9am" morning summary
+                       — recurring task (cron or natural lang)
+  /alert cpu 90        — fire when CPU ≥ 90%
+  /alert disk 85       — fire when disk ≥ 85%
+  /alert memory 80     — fire when memory ≥ 80%
+  /alert process nginx — fire when nginx stops
+
 Conversation
   /clear               — start a fresh Claude conversation
   /fork [save|load|delete] <name> — branch / switch branches

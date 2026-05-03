@@ -43,6 +43,7 @@ from adapters.web import WebAdapter
 from kernel import ChatAdapter
 from kernel.claude import ClaudeRunner
 from kernel.runner import Context, Dispatcher
+from kernel.scheduler import Scheduler
 import actions as alfred_actions
 
 # Discord and Slack adapters are imported lazily inside _build_adapters()
@@ -211,11 +212,19 @@ async def run() -> None:
         sys.exit(2)
 
     dispatcher = Dispatcher(default_handler=default_text)
-    alfred_actions.register_all(dispatcher, claude_runner=_get_claude())
+    scheduler = Scheduler()
+    for a in adapters:
+        scheduler.register_adapter(a)
+    alfred_actions.register_all(
+        dispatcher,
+        claude_runner=_get_claude(),
+        scheduler_instance=scheduler,
+    )
 
-    # Start every adapter
+    # Start every adapter, then the scheduler
     for a in adapters:
         await a.start()
+    await scheduler.start()
 
     # Print the web URL so users know where to click
     for a in adapters:
@@ -240,6 +249,7 @@ async def run() -> None:
     for t in tasks:
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
+    await scheduler.stop()
     for a in adapters:
         try:
             await a.stop()

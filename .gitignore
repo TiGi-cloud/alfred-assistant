@@ -41,6 +41,7 @@ USER_CONTEXT.md
 claude_sessions.json
 claude_forks.json
 claude_usage.json
+alfred_scheduler.json
 
 # --- Bot runtime data ---
 snapshots/

@@ -26,6 +26,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 import tempfile
 from pathlib import Path
 
@@ -634,6 +635,8 @@ async def test_actions() -> None:
         "help", "open", "ping", "whoami",
         # session (memory + claude)
         "clear", "cost", "fork", "memory",
+        # scheduler
+        "alert", "remind", "schedule", "timer",
     }
     expect(set(commands) == expected,
            f"actions.register_all registers exactly {len(expected)} commands",
@@ -828,6 +831,129 @@ async def test_session_memory() -> None:
         clear_memories("test:u1")
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# 9e) Scheduler — reminders, schedules, alerts
+# ---------------------------------------------------------------------------
+async def test_scheduler() -> None:
+    section("Scheduler — /remind /timer /schedule /alert")
+
+    from kernel import (Chat, ChatAdapter, Message, MessageKind, SentMessage,
+                        User)
+    from kernel.runner import Context, Dispatcher
+    from kernel.scheduler import Scheduler, parse_when, parse_natural_schedule
+
+    # parse_when sanity
+    now = 1_700_000_000
+    expect(int(parse_when("in 5 min", now=now)) == now + 300, "parse_when 'in 5 min'")
+    expect(int(parse_when("in 2 hours", now=now)) == now + 7200, "parse_when 'in 2 hours'")
+    expect(parse_when("garbage") is None, "parse_when rejects garbage")
+
+    # parse_natural_schedule basics
+    expect(parse_natural_schedule("every 5 min") == "*/5 * * * *",
+           "parse_natural 'every 5 min'")
+    expect(parse_natural_schedule("every day at 9am") == "0 9 * * *",
+           "parse_natural 'every day at 9am'")
+    expect(parse_natural_schedule("every weekday") == "0 9 * * 1-5",
+           "parse_natural 'every weekday'")
+
+    # Stand up a scheduler with a fake adapter and exercise the full flow
+    sent: list[tuple[str, str]] = []
+
+    class FireAdapter(ChatAdapter):
+        name = "test"
+        async def start(self): pass
+        async def stop(self): pass
+        async def messages(self):
+            if False: yield  # pragma: no cover
+        async def callbacks(self):
+            if False: yield  # pragma: no cover
+        async def send_text(self, chat_id, text, **kw):
+            sent.append((chat_id, text))
+            return SentMessage(chat_id=chat_id, message_id="0")
+        async def edit_text(self, sent, text, **kw): pass
+        async def delete(self, sent): pass
+        async def send_photo(self, *a, **kw): pass
+        async def send_video(self, *a, **kw): pass
+        async def send_voice(self, *a, **kw): pass
+        async def send_document(self, *a, **kw): pass
+        async def send_typing(self, chat_id): pass
+        async def authorize(self, user): return True
+        async def download_attachment(self, att, dest=None): return Path()
+
+    state = Path(tempfile.gettempdir()) / "alfred-test-sched.json"
+    if state.exists():
+        state.unlink()
+
+    fa = FireAdapter()
+    sched = Scheduler(state_path=state, poll_interval=0.05)
+    sched.register_adapter(fa)
+
+    ctx = Context(adapter=fa,
+                  message=Message(id="x", chat=Chat(id="c1"), user=User(id="u"),
+                                  kind=MessageKind.TEXT, text=""))
+
+    # Reminder fires when due
+    job = sched.add_reminder(ctx, time.time() - 1, "wake up")
+    expect(state.exists(), "scheduler persists state to disk")
+    persisted = json.loads(state.read_text())
+    expect("test:c1" in persisted and len(persisted["test:c1"]) == 1,
+           "reminder appears in state file")
+
+    sent.clear()
+    await sched.tick()
+    expect(any("wake up" in t for _, t in sent),
+           "due reminder fires via adapter.send_text",
+           f"sent={sent}")
+    expect(not sched.list_jobs(ctx, kind="reminder"),
+           "reminder removes itself after firing")
+
+    # Reminder NOT due → no fire
+    sent.clear()
+    sched.add_reminder(ctx, time.time() + 3600, "later")
+    await sched.tick()
+    expect(not sent, "future reminder doesn't fire yet")
+    expect(len(sched.list_jobs(ctx, kind="reminder")) == 1,
+           "future reminder still pending")
+
+    # Schedule (cron) → fires at appropriate moment
+    sent.clear()
+    j = sched.add_schedule(ctx, "every minute", "tick")
+    expect(j["cron"] == "* * * * *", "schedule cron normalised from natural lang")
+    # Force last_fired into the past so next_cron_fire <= now
+    j["last_fired"] = time.time() - 120
+    await sched.tick()
+    expect(any("tick" in t for _, t in sent), "schedule fires when due",
+           f"sent={sent}")
+    expect(len(sched.list_jobs(ctx, kind="schedule")) == 1,
+           "schedule does NOT delete itself (recurring)")
+
+    # Alert: process check (alert when nginx not running — almost surely true on test box)
+    sent.clear()
+    a = sched.add_alert(ctx, "process", label="totally-not-a-real-process-xyz")
+    a["last_fired"] = 0  # bypass cooldown
+    await sched.tick()
+    expect(any("ALERT" in t and "totally-not" in t for _, t in sent),
+           "process alert fires for missing process",
+           f"sent={sent}")
+
+    # Cooldown prevents immediate re-fire
+    sent.clear()
+    await sched.tick()
+    expect(not any("ALERT" in t for _, t in sent),
+           "alert cooldown prevents immediate re-fire")
+
+    # Listing + removal
+    jobs = sched.list_jobs(ctx)
+    expect(len(jobs) >= 3, f"list_jobs sees all jobs ({len(jobs)} found)")
+    rid = next(j["id"] for j in jobs if j["kind"] == "reminder")
+    expect(sched.remove_job(ctx, rid), "remove_job returns True for known id")
+    expect(not sched.remove_job(ctx, "nope"), "remove_job returns False for unknown id")
+
+    # Cleanup
+    if state.exists():
+        state.unlink()
 
 
 # ---------------------------------------------------------------------------
@@ -1048,6 +1174,7 @@ async def amain() -> int:
     test_applescript_syntax()
     test_adapter_serialisation()
     await test_actions()
+    await test_scheduler()
     await test_claude_runner()
     await test_session_memory()
     test_app_smoke()
