@@ -133,32 +133,56 @@ Background tasks (every 60s):
 
 ## Setup
 
+### Easiest path (browser wizard, recommended for non-developers)
+
 ```bash
 # 1. Clone the repo
 git clone https://github.com/TiGi-cloud/alfred-assistant.git
 cd alfred-assistant
 
-# 2. Install Python dependencies
-pip3 install -r requirements.txt
-
-# 3. Install macOS helpers
-brew install ffmpeg imagesnap        # imagesnap is optional, used by /camera
-
-# 4. Create a Telegram bot via @BotFather and copy the token
-
-# 5. Configure environment
-cp .env.example .env
-# Edit .env and fill in:
-#   TELEGRAM_BOT_TOKEN  – from @BotFather
-#   ALLOWED_USERS       – your Telegram username(s), comma-separated
-#   ALLOWED_USER_IDS    – optional, your Telegram user ID(s)
-#   WEBHOOK_SECRET      – optional, for /webhook endpoint
-#   WEBAPP_URL          – optional, HTTPS URL of the Mini App dashboard
-#   CLAUDE_BIN          – optional, override path to the claude CLI
-
-# 6. Run
-python3 bot.py
+# 2. Run the installer — it sets up dependencies and opens a browser wizard
+./install.sh
 ```
+
+The wizard at <http://localhost:8080> walks you through:
+
+1. Pasting a Telegram bot token from [@BotFather](https://t.me/BotFather)
+2. Listing the Telegram usernames allowed to talk to your bot
+3. Toggling the local browser chat at <http://localhost:8765>
+4. Optional: Webhook secret, Mini App URL, custom paths
+
+It writes a `.env` file (mode 0600), then exits with restart instructions.
+
+### Manual path
+
+```bash
+# 1. Clone & install dependencies
+git clone https://github.com/TiGi-cloud/alfred-assistant.git
+cd alfred-assistant
+pip3 install -r requirements.txt
+brew install ffmpeg imagesnap        # imagesnap optional, used by /camera
+
+# 2. Create a Telegram bot via @BotFather and copy the token
+
+# 3. Copy and edit the env template
+cp .env.example .env
+# fill in TELEGRAM_BOT_TOKEN, ALLOWED_USERS, etc.
+
+# 4. Run
+python3 app.py             # multi-adapter (Telegram + browser chat)
+# or
+python3 bot.py             # legacy entry point — Telegram only, full feature set
+```
+
+### Two entry points (during the multi-chat refactor)
+
+- **`app.py`** — new multi-adapter entry point. Runs Telegram + a local browser
+  chat side-by-side via the `kernel.ChatAdapter` interface. A handful of demo
+  commands are wired (`/ping`, `/whoami`, `/screenshot`); more get ported with
+  every release.
+- **`bot.py`** — legacy entry point. The original full-feature Telegram bot.
+  Use this if you need the complete command set today; switch to `app.py` once
+  the migration completes.
 
 ### Auto-start on boot (optional)
 

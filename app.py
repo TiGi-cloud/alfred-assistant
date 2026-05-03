@@ -215,8 +215,32 @@ def _check_port(host: str, port: int) -> bool:
         sock.close()
 
 
+def _needs_setup() -> bool:
+    """First-run check: no .env AND no env vars in the parent shell."""
+    env_path = Path(__file__).parent / ".env"
+    if env_path.exists():
+        return False
+    if os.environ.get("TELEGRAM_BOT_TOKEN"):
+        return False
+    return True
+
+
 def main() -> None:
     _setup_logging()
+
+    if "--setup" in sys.argv or _needs_setup():
+        print(
+            "\n  No .env found — launching first-run setup wizard.\n"
+            "  After saving, restart with: python3 app.py\n",
+            flush=True,
+        )
+        import setup_wizard
+        try:
+            asyncio.run(setup_wizard.serve())
+        except (KeyboardInterrupt, SystemExit):
+            pass
+        return
+
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
