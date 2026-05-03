@@ -38,6 +38,9 @@ global_env.json
 webapp_pin.json
 health_status.json
 USER_CONTEXT.md
+claude_sessions.json
+claude_forks.json
+claude_usage.json
 
 # --- Bot runtime data ---
 snapshots/
