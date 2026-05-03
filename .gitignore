@@ -43,6 +43,8 @@ claude_forks.json
 claude_usage.json
 alfred_scheduler.json
 alfred_machines.json
+alfred_projects.json
+alfred_notifications.json
 
 # --- Bot runtime data ---
 snapshots/

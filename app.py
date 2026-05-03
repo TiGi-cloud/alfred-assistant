@@ -44,8 +44,10 @@ from kernel import ChatAdapter
 from kernel.claude import ClaudeRunner
 from kernel.runner import Context, Dispatcher
 from kernel.machines import MachineRegistry
+from kernel.projects import ProjectRegistry
 from kernel.scheduler import Scheduler
 import actions as alfred_actions
+from actions.notifications import NotificationWatcher
 
 # Discord and Slack adapters are imported lazily inside _build_adapters()
 # so missing optional dependencies (discord.py, slack-bolt) don't break
@@ -56,11 +58,22 @@ import actions as alfred_actions
 _claude_runner: ClaudeRunner | None = None
 
 
+_project_registry: ProjectRegistry | None = None
+
+
+def _get_projects() -> ProjectRegistry:
+    global _project_registry
+    if _project_registry is None:
+        _project_registry = ProjectRegistry()
+    return _project_registry
+
+
 def _get_claude() -> ClaudeRunner:
     global _claude_runner
     if _claude_runner is None:
         _claude_runner = ClaudeRunner(
             model=os.environ.get("CLAUDE_MODEL") or None,
+            project_registry=_get_projects(),
         )
     return _claude_runner
 
@@ -215,19 +228,24 @@ async def run() -> None:
     dispatcher = Dispatcher(default_handler=default_text)
     scheduler = Scheduler()
     machines_registry = MachineRegistry()
+    notif_watcher = NotificationWatcher()
     for a in adapters:
         scheduler.register_adapter(a)
+        notif_watcher.register_adapter(a)
     alfred_actions.register_all(
         dispatcher,
         claude_runner=_get_claude(),
         scheduler_instance=scheduler,
         machines_registry=machines_registry,
+        project_registry=_get_projects(),
     )
 
-    # Start every adapter, then the scheduler
+    # Start every adapter, then the scheduler + notification watcher
     for a in adapters:
         await a.start()
     await scheduler.start()
+    if sys.platform == "darwin":
+        await notif_watcher.start()
 
     # Print the web URL so users know where to click
     for a in adapters:
@@ -253,6 +271,12 @@ async def run() -> None:
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
     await scheduler.stop()
+    await notif_watcher.stop()
+    try:
+        from kernel.browser import shutdown_pool
+        await shutdown_pool()
+    except Exception:
+        pass
     for a in adapters:
         try:
             await a.stop()

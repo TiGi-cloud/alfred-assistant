@@ -61,6 +61,7 @@ DEFAULT_SYSTEM_PROMPT = (
 # ---------------------------------------------------------------------------
 _SEND_FILE_RE = re.compile(r"\[SEND_FILE:([^\]]+)\]")
 _REMEMBER_RE = re.compile(r"\[REMEMBER:([^:]+):([^\]]+)\]")
+_BROWSE_RE = re.compile(r"\[BROWSE:([^\]]+)\]")
 
 # Mimes treated as photos when picking send_photo vs send_document
 _PHOTO_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic"}
@@ -145,6 +146,7 @@ class ClaudeRunner:
     extra_env: dict[str, str] = field(default_factory=dict)
     extract_memories: bool = True
     inject_memories: bool = True
+    project_registry: object = None  # optional kernel.projects.ProjectRegistry
 
     # Internal
     _sessions: dict[str, str] = field(default_factory=dict, init=False)
@@ -283,15 +285,40 @@ class ClaudeRunner:
             "--output-format", "stream-json",
             "--verbose",
         ]
-        if self.model:
-            cmd.extend(["--model", self.model])
+        proj = self._project_for(ctx)
+        model = (proj.model if proj and proj.model else None) or self.model
+        if model:
+            cmd.extend(["--model", model])
         if (sid := self._sessions.get(self._key(ctx))):
             cmd.extend(["--resume", sid])
         return cmd
 
+    def _project_for(self, ctx: Context):
+        if self.project_registry is None:
+            return None
+        try:
+            return self.project_registry.context_for(ctx)
+        except Exception:
+            return None
+
+    def _cwd_for(self, ctx: Context) -> Path:
+        proj = self._project_for(ctx)
+        if proj and proj.cwd.is_dir():
+            return proj.cwd
+        return self.cwd or Path.cwd()
+
+    def _env_for(self, ctx: Context) -> dict[str, str]:
+        env = os.environ.copy()
+        env.pop("CLAUDECODE", None)
+        env.update(self.extra_env)
+        proj = self._project_for(ctx)
+        if proj:
+            env.update(proj.env)
+        return env
+
     # -- Marker handling ---------------------------------------------------
     async def _handle_markers(self, ctx: Context, text: str) -> str:
-        """Process [SEND_FILE:...] and [REMEMBER:...] markers, return cleaned text."""
+        """Process [SEND_FILE:…], [BROWSE:…], [REMEMBER:…] markers; return cleaned text."""
         for m in _SEND_FILE_RE.finditer(text):
             path = m.group(1).strip()
             if not os.path.exists(path):
@@ -310,7 +337,27 @@ class ClaudeRunner:
             except Exception:
                 logger.exception("Failed to send file %s", path)
 
-        # Extract [REMEMBER:cat:fact] entries → persistent memory
+        # [BROWSE:url] → headless screenshot, send as photo with caption.
+        for m in _BROWSE_RE.finditer(text):
+            url = m.group(1).strip()
+            if not url:
+                continue
+            try:
+                from .browser import get_pool
+                shot = await get_pool().screenshot(url, session_key=self._key(ctx))
+                await ctx.adapter.send_photo(ctx.chat_id, shot, caption=url)
+                try:
+                    Path(shot).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.warning("[BROWSE] %s failed: %s", url, e)
+                try:
+                    await ctx.adapter.send_text(ctx.chat_id, f"⚠️ couldn't browse {url}: {e}")
+                except Exception:
+                    pass
+
+        # [REMEMBER:cat:fact] → persistent memory
         if self.extract_memories:
             for m in _REMEMBER_RE.finditer(text):
                 category = m.group(1).strip().lower()
@@ -325,6 +372,7 @@ class ClaudeRunner:
                         logger.exception("Memory persistence failed")
 
         cleaned = _SEND_FILE_RE.sub("", text)
+        cleaned = _BROWSE_RE.sub("", cleaned)
         cleaned = _REMEMBER_RE.sub("", cleaned)
         return cleaned.strip()
 
@@ -381,9 +429,7 @@ class ClaudeRunner:
             await ctx.adapter.send_text(ctx.chat_id, str(e))
             return ""
 
-        env = os.environ.copy()
-        env.pop("CLAUDECODE", None)
-        env.update(self.extra_env)
+        env = self._env_for(ctx)
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -392,7 +438,7 @@ class ClaudeRunner:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
-                cwd=str(self.cwd),
+                cwd=str(self._cwd_for(ctx)),
                 # claude's `system` init line can exceed 64 KB when many MCP
                 # tools are configured. Raise the StreamReader limit so
                 # readline() doesn't choke.

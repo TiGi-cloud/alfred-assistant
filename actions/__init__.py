@@ -24,9 +24,26 @@ Then in app.py:
     from actions import myfeature
     myfeature.register(dispatcher)
 """
-from . import machines, memory, scheduler, screen, session, system, web
+from . import (
+    gmail,
+    machines,
+    memory,
+    menu,
+    notifications,
+    projects,
+    research,
+    scheduler,
+    screen,
+    session,
+    system,
+    web,
+    web_browse,
+)
 
-__all__ = ["machines", "memory", "scheduler", "screen", "session", "system", "web"]
+__all__ = [
+    "gmail", "machines", "memory", "menu", "notifications", "projects",
+    "research", "scheduler", "screen", "session", "system", "web", "web_browse",
+]
 
 
 def register_all(
@@ -35,6 +52,7 @@ def register_all(
     claude_runner=None,
     scheduler_instance=None,
     machines_registry=None,
+    project_registry=None,
 ) -> None:
     """Convenience: register every handler module's commands at once.
 
@@ -42,12 +60,20 @@ def register_all(
       `claude_runner`     → /clear /fork /cost
       `scheduler_instance`→ /remind /timer /schedule /alert
       `machines_registry` → /machine /wake
+      `project_registry`  → /project
     Modules without their dependency become friendly no-ops.
     """
     screen.register(dispatcher)
     system.register(dispatcher)
     web.register(dispatcher)
+    web_browse.register(dispatcher)
     memory.register(dispatcher)
     session.register(dispatcher, runner=claude_runner)
     scheduler.register(dispatcher, scheduler=scheduler_instance)
     machines.register(dispatcher, registry=machines_registry)
+    projects.register(dispatcher, registry=project_registry)
+    notifications.register(dispatcher)
+    research.register(dispatcher)
+    gmail.register(dispatcher)
+    # Menu is last so it can iterate over all registered commands
+    menu.register(dispatcher)

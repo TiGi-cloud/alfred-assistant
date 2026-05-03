@@ -631,14 +631,16 @@ async def test_actions() -> None:
         # system
         "apps", "battery", "clipboard", "focus", "ip", "paste", "processes",
         "search", "shortcut", "status", "tts", "uptime", "volume", "wifi",
-        # web
+        # web (informational)
         "help", "open", "ping", "whoami",
         # session (memory + claude)
         "clear", "cost", "fork", "memory",
         # scheduler
         "alert", "remind", "schedule", "timer",
-        # machines
-        "machine", "wake",
+        # machines + projects
+        "machine", "wake", "project",
+        # menus + notifications + research + gmail + headless web
+        "start", "menu", "notifications", "research", "gmail", "web",
     }
     expect(set(commands) == expected,
            f"actions.register_all registers exactly {len(expected)} commands",
@@ -833,6 +835,129 @@ async def test_session_memory() -> None:
         clear_memories("test:u1")
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# 9g) ProjectRegistry, menu, notifications toggle
+# ---------------------------------------------------------------------------
+async def test_projects_menu_notifs() -> None:
+    section("ProjectRegistry, /menu keyboard, /notifications toggle")
+
+    from kernel import (Chat, ChatAdapter, Keyboard, Message, MessageKind,
+                        SentMessage, User)
+    from kernel.projects import ProjectRegistry
+    from kernel.runner import Context, Dispatcher
+
+    state = Path(tempfile.gettempdir()) / "alfred-test-projects.json"
+    if state.exists():
+        state.unlink()
+
+    reg = ProjectRegistry(state_path=state)
+
+    class TA(ChatAdapter):
+        name = "test"
+        sent: list = []
+        keyboards: list = []
+        async def start(self): pass
+        async def stop(self): pass
+        async def messages(self):
+            if False: yield  # pragma: no cover
+        async def callbacks(self):
+            if False: yield  # pragma: no cover
+        async def send_text(self, chat_id, text, *, keyboard=None, **kw):
+            self.sent.append(text)
+            if keyboard:
+                self.keyboards.append(keyboard)
+            return SentMessage(chat_id=chat_id, message_id="0")
+        async def edit_text(self, *a, **kw): pass
+        async def delete(self, *a, **kw): pass
+        async def send_photo(self, *a, **kw): pass
+        async def send_video(self, *a, **kw): pass
+        async def send_voice(self, *a, **kw): pass
+        async def send_document(self, *a, **kw): pass
+        async def send_typing(self, *a, **kw): pass
+        async def authorize(self, user): return True
+        async def download_attachment(self, att, dest=None): return Path()
+
+    ta = TA()
+    ctx = Context(adapter=ta,
+                  message=Message(id="x", chat=Chat(id="c"), user=User(id="u"),
+                                  kind=MessageKind.TEXT, text=""))
+
+    # Add a project pointing at a real directory; switch active; verify
+    # context_for() returns a usable ProjectContext
+    cwd = tempfile.mkdtemp(prefix="alfred-test-cwd-")
+    info = reg.add(ctx, "myapp", cwd=cwd)
+    expect(info["cwd"] == str(Path(cwd).resolve()), "project add resolves cwd")
+    reg.set_active(ctx, "myapp")
+    pctx = reg.context_for(ctx)
+    expect(pctx is not None and pctx.name == "myapp",
+           "context_for returns active ProjectContext")
+    expect(str(pctx.cwd) == str(Path(cwd).resolve()),
+           "ProjectContext.cwd matches added cwd")
+
+    # set_env round trip
+    reg.set_env(ctx, "myapp", "DEBUG", "true")
+    pctx2 = reg.context_for(ctx)
+    expect(pctx2.env.get("DEBUG") == "true", "set_env persists")
+    reg.set_env(ctx, "myapp", "DEBUG", None)
+    pctx3 = reg.context_for(ctx)
+    expect("DEBUG" not in pctx3.env, "set_env(None) removes the key")
+
+    # Persistence across instances
+    reg2 = ProjectRegistry(state_path=state)
+    pctx4 = reg2.context_for(ctx)
+    expect(pctx4 is not None and pctx4.name == "myapp",
+           "ProjectRegistry survives restart")
+
+    # Removing active project resets active
+    reg2.remove(ctx, "myapp")
+    expect(reg2.context_for(ctx) is None,
+           "removing active project clears active pointer")
+
+    # Cleanup
+    if state.exists():
+        state.unlink()
+    Path(cwd).rmdir()
+
+    # /menu sends a keyboard
+    import actions
+    d = Dispatcher()
+    actions.register_all(d)
+    TA.sent.clear()
+    TA.keyboards.clear()
+    msg = Message(id="x", chat=Chat(id="c"), user=User(id="u"),
+                  kind=MessageKind.COMMAND, text="/menu")
+    await d._dispatch_message(ta, msg)
+    expect(any(isinstance(k, Keyboard) for k in TA.keyboards),
+           "/menu sends a Keyboard")
+    expect(any("Alfred" in t for t in TA.sent), "/menu has a header")
+
+    # /notifications toggle round-trip
+    notif_state = Path(__file__).resolve().parent.parent / "alfred_notifications.json"
+    if notif_state.exists():
+        notif_state.unlink()
+
+    TA.sent.clear()
+    msg = Message(id="x", chat=Chat(id="c"), user=User(id="u"),
+                  kind=MessageKind.COMMAND, text="/notifications on")
+    await d._dispatch_message(ta, msg)
+    expect(any("ON" in t for t in TA.sent), "/notifications on confirms")
+    expect(notif_state.exists(), "notifications state file written")
+    state_loaded = json.loads(notif_state.read_text())
+    expect(state_loaded.get("test:c") is True,
+           "notification toggle stored under chat key")
+
+    TA.sent.clear()
+    msg = Message(id="x", chat=Chat(id="c"), user=User(id="u"),
+                  kind=MessageKind.COMMAND, text="/notifications off")
+    await d._dispatch_message(ta, msg)
+    expect(any("OFF" in t for t in TA.sent), "/notifications off confirms")
+    state_loaded = json.loads(notif_state.read_text())
+    expect("test:c" not in state_loaded, "off removes the chat key")
+
+    if notif_state.exists():
+        notif_state.unlink()
 
 
 # ---------------------------------------------------------------------------
@@ -1289,6 +1414,7 @@ async def amain() -> int:
     test_adapter_serialisation()
     await test_actions()
     test_machines()
+    await test_projects_menu_notifs()
     await test_scheduler()
     await test_claude_runner()
     await test_session_memory()
