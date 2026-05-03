@@ -1,0 +1,58 @@
+# --- Secrets ---
+.env
+*.env.local
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+env/
+
+# --- Bot runtime state (generated, never commit) ---
+sessions.json
+cost_tracker.json
+user_models.json
+alerts.json
+history.json
+forks.json
+schedules.json
+machines.json
+notifications.json
+pinned.json
+user_machines_sel.json
+default_chat.json
+reminders.json
+metrics.json
+geofences.json
+projects.json
+active_project.json
+global_env.json
+webapp_pin.json
+health_status.json
+USER_CONTEXT.md
+
+# --- Bot runtime data ---
+snapshots/
+data/
+alfred.db
+alfred.db-shm
+alfred.db-wal
+alfred.log*
+cloudflared.log*
+launchd-stdout.log
+launchd-stderr.log
+
+# --- macOS / editor noise ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

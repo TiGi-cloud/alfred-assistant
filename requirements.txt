@@ -1,0 +1,4 @@
+python-telegram-bot==21.6
+aiohttp>=3.9
+croniter>=2.0
+playwright>=1.40
