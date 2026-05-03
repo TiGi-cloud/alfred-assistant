@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff
+
+      - name: Syntax check (py_compile)
+        run: |
+          python -m py_compile $(git ls-files '*.py')
+
+      - name: Lint (ruff — bugs only, not style)
+        run: |
+          # Conservative ruleset focused on real correctness problems:
+          #   E9   — actual syntax errors
+          #   F63  — invalid comparisons (== None, etc.)
+          #   F7   — syntactic semantic checks (return outside fn, etc.)
+          #   F82  — undefined names
+          # Style and dead-code rules (F401, F841, B007, B905, F541) are
+          # handled in code reviews, not gating CI.
+          ruff check --select=E9,F63,F7,F82 .
+
+      - name: Import smoke test
+        env:
+          TELEGRAM_BOT_TOKEN: dummy
+          ALLOWED_USERS: ci
+        run: |
+          python -c "import kernel; import adapters.telegram; import adapters.web; print('all imports ok')"
+          python -c "
+          import sys; sys.path.insert(0, '.')
+          import importlib.util
+          spec = importlib.util.spec_from_file_location('app', './app.py')
+          mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+          print('app.py loads')
+          "

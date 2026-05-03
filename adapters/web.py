@@ -31,13 +31,12 @@ import mimetypes
 import time
 import uuid
 from pathlib import Path
-from typing import AsyncIterator, Iterable, Optional
+from typing import AsyncIterator, Optional
 
 from aiohttp import WSMsgType, web
 
 from kernel import (
     Attachment,
-    AttachmentKind,
     CallbackPress,
     Chat,
     ChatAdapter,

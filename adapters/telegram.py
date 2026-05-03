@@ -26,7 +26,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import AsyncIterator, Iterable, Optional, Union
+from typing import AsyncIterator, Iterable, Optional
 
 from telegram import (
     InlineKeyboardButton,
@@ -48,7 +48,6 @@ from kernel import (
     CallbackPress,
     Chat,
     ChatAdapter,
-    InlineRow,
     Keyboard,
     Location,
     Message,
