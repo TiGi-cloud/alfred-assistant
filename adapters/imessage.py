@@ -128,7 +128,9 @@ def _connect_db() -> sqlite3.Connection:
     uri = f"file:{CHAT_DB}?mode=ro"
     try:
         conn = sqlite3.connect(uri, uri=True, timeout=5)
-    except sqlite3.OperationalError as e:
+        # Provoke an actual read so authorisation issues surface immediately
+        conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
+    except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
         raise RuntimeError(
             f"Cannot read chat.db: {e}. Grant Full Disk Access to the Python "
             "interpreter in System Settings → Privacy & Security."

@@ -42,16 +42,9 @@ jobs:
           # handled in code reviews, not gating CI.
           ruff check --select=E9,F63,F7,F82 .
 
-      - name: Import smoke test
+      - name: Comprehensive offline test suite
         env:
           TELEGRAM_BOT_TOKEN: dummy
           ALLOWED_USERS: ci
         run: |
-          python -c "import kernel; import adapters.telegram; import adapters.web; print('all imports ok')"
-          python -c "
-          import sys; sys.path.insert(0, '.')
-          import importlib.util
-          spec = importlib.util.spec_from_file_location('app', './app.py')
-          mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
-          print('app.py loads')
-          "
+          python tests/test_all.py
