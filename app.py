@@ -43,6 +43,10 @@ from adapters.web import WebAdapter
 from kernel import ChatAdapter
 from kernel.runner import Context, Dispatcher
 
+# Discord and Slack adapters are imported lazily inside _build_adapters()
+# so missing optional dependencies (discord.py, slack-bolt) don't break
+# users who only run Telegram + Web.
+
 logger = logging.getLogger("alfred.app")
 
 
@@ -142,6 +146,50 @@ def _build_adapters() -> list[ChatAdapter]:
         port = int(os.environ.get("WEB_PORT", "8765"))
         token = os.environ.get("WEB_AUTH_TOKEN") or secrets.token_urlsafe(24)
         adapters.append(WebAdapter(host=host, port=port, auth_token=token))
+
+    # Discord (optional)
+    discord_token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+    if discord_token:
+        try:
+            from adapters.discord import DiscordAdapter
+        except Exception as e:
+            logger.warning("Discord token set but adapter unavailable: %s", e)
+        else:
+            allowed = [
+                int(x.strip())
+                for x in os.environ.get("DISCORD_ALLOWED_USER_IDS", "").split(",")
+                if x.strip().isdigit()
+            ]
+            if not allowed:
+                logger.warning(
+                    "Discord adapter has no DISCORD_ALLOWED_USER_IDS — anyone "
+                    "in a server with the bot can use it."
+                )
+            adapters.append(DiscordAdapter(discord_token, allowed_user_ids=allowed))
+
+    # Slack (optional)
+    slack_bot = os.environ.get("SLACK_BOT_TOKEN", "").strip()
+    slack_app = os.environ.get("SLACK_APP_TOKEN", "").strip()
+    if slack_bot and slack_app:
+        try:
+            from adapters.slack import SlackAdapter
+        except Exception as e:
+            logger.warning("Slack tokens set but adapter unavailable: %s", e)
+        else:
+            allowed = [
+                x.strip() for x in os.environ.get("SLACK_ALLOWED_USER_IDS", "").split(",") if x.strip()
+            ]
+            if not allowed:
+                logger.warning(
+                    "Slack adapter has no SLACK_ALLOWED_USER_IDS — anyone in "
+                    "the workspace can use the bot."
+                )
+            adapters.append(SlackAdapter(slack_bot, slack_app, allowed_user_ids=allowed))
+    elif slack_bot or slack_app:
+        logger.warning(
+            "Slack adapter needs BOTH SLACK_BOT_TOKEN (xoxb-…) and "
+            "SLACK_APP_TOKEN (xapp-…). Skipping."
+        )
 
     return adapters
 

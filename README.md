@@ -1,10 +1,19 @@
-# Alfred — Remote Mac Assistant via Telegram
+# Alfred — Remote Mac Assistant via Telegram, Discord, Slack, or Web
 
-A Telegram bot that gives you full remote control of your Mac through Claude. Send messages, photos, voice notes, or files — Alfred handles them on your machine and reports back.
+A self-hosted bot that gives you full remote control of your Mac through Claude. Talk to it from Telegram, Discord, Slack, or a browser chat — same commands, same conversation memory, anywhere.
 
 > ⚠️ **Self-hosted only.** Alfred runs shell commands on the host with no sandbox. **Do not host this for other people** — only run your own copy on your own Mac.
 
-> 🚧 Multi-chat support (Discord / Slack / Web UI) is on the roadmap. Today, Alfred ships with a Telegram adapter only.
+## Supported chat platforms
+
+| Platform | Setup |
+|---|---|
+| **Telegram** | Free bot token from [@BotFather](https://t.me/BotFather). Always available. |
+| **Web (browser)** | Built in. Opens at `http://localhost:8765`. No external account needed. |
+| **Discord** | Free bot from [Discord Developer Portal](https://discord.com/developers/applications). `pip install 'discord.py>=2.4'`. |
+| **Slack** | Free Slack app with Socket Mode. `pip install 'slack-bolt[async]>=1.18'`. |
+
+Run any combination — the setup wizard lets you pick.
 
 ## Features
 

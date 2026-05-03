@@ -181,6 +181,37 @@ _SETUP_HTML = """<!doctype html>
     </div>
 
     <div class="card">
+      <h2>Discord <span class="pill optional">optional</span></h2>
+      <div class="help">
+        1. Open <a href="https://discord.com/developers/applications" target="_blank" rel="noopener">Discord Developer Portal</a> and create an app.<br>
+        2. Add a Bot, copy its token. Enable the <em>Message Content</em> privileged intent.<br>
+        3. Invite the bot to your server with the OAuth2 URL Generator.
+      </div>
+      <label>Bot token</label>
+      <input type="password" name="discord_bot_token" placeholder="MTIz…" autocomplete="off">
+
+      <label>Allowed Discord user IDs — 18-digit snowflakes, comma-separated</label>
+      <input type="text" name="discord_allowed_user_ids" placeholder="123456789012345678" autocomplete="off">
+    </div>
+
+    <div class="card">
+      <h2>Slack <span class="pill optional">optional</span></h2>
+      <div class="help">
+        1. <a href="https://api.slack.com/apps" target="_blank" rel="noopener">Create a Slack app</a> → enable Socket Mode → generate an App-level token (xapp-…).<br>
+        2. Add Bot Scopes (chat:write, im:history, im:read, files:write, app_mentions:read) and install to workspace → copy Bot Token (xoxb-…).<br>
+        3. Subscribe to bot events: message.im, app_mention.
+      </div>
+      <label>Bot token (xoxb-…)</label>
+      <input type="password" name="slack_bot_token" placeholder="xoxb-…" autocomplete="off">
+
+      <label>App-level token (xapp-…)</label>
+      <input type="password" name="slack_app_token" placeholder="xapp-…" autocomplete="off">
+
+      <label>Allowed Slack user IDs (e.g. U01ABCDE), comma-separated</label>
+      <input type="text" name="slack_allowed_user_ids" placeholder="U01ABCDE" autocomplete="off">
+    </div>
+
+    <div class="card">
       <h2>Advanced <span class="pill optional">optional</span></h2>
       <div class="help">Leave blank to use defaults.</div>
       <label>WEBHOOK_SECRET — bearer token for the /webhook endpoint (auto-generated if blank)</label>
@@ -272,6 +303,21 @@ def write_env(path: Path, settings: dict) -> None:
     add("WEBAPP_URL", settings.get("webapp_url"))
     add("CLAUDE_BIN", settings.get("claude_bin"))
 
+    # Discord
+    if settings.get("discord_bot_token"):
+        lines.append("")
+        lines.append("# Discord — discord.com/developers/applications")
+        add("DISCORD_BOT_TOKEN", settings.get("discord_bot_token"))
+        add("DISCORD_ALLOWED_USER_IDS", settings.get("discord_allowed_user_ids"))
+
+    # Slack
+    if settings.get("slack_bot_token") and settings.get("slack_app_token"):
+        lines.append("")
+        lines.append("# Slack — api.slack.com/apps (Socket Mode)")
+        add("SLACK_BOT_TOKEN", settings.get("slack_bot_token"))
+        add("SLACK_APP_TOKEN", settings.get("slack_app_token"))
+        add("SLACK_ALLOWED_USER_IDS", settings.get("slack_allowed_user_ids"))
+
     web_enabled = bool(settings.get("web_enabled"))
     if not web_enabled:
         lines.append("WEB_DISABLED=1")
@@ -303,15 +349,23 @@ async def _save(request: web.Request) -> web.Response:
     allowed_users = (data.get("allowed_users") or "").strip()
     allowed_ids = (data.get("allowed_user_ids") or "").strip()
     web_enabled = bool(data.get("web_enabled"))
+    discord_token = (data.get("discord_bot_token") or "").strip()
+    slack_bot = (data.get("slack_bot_token") or "").strip()
+    slack_app = (data.get("slack_app_token") or "").strip()
 
-    if not token and not web_enabled:
+    if not (token or web_enabled or discord_token or (slack_bot and slack_app)):
         return web.json_response(
-            {"ok": False, "error": "Configure at least Telegram or Web chat."},
+            {"ok": False, "error": "Configure at least one chat (Telegram, Web, Discord, or Slack)."},
             status=400,
         )
     if token and not allowed_users and not allowed_ids:
         return web.json_response(
             {"ok": False, "error": "Telegram requires ALLOWED_USERS or ALLOWED_USER_IDS — otherwise the bot is open to anyone."},
+            status=400,
+        )
+    if (slack_bot and not slack_app) or (slack_app and not slack_bot):
+        return web.json_response(
+            {"ok": False, "error": "Slack needs BOTH Bot Token (xoxb-…) AND App-level Token (xapp-…)."},
             status=400,
         )
 
