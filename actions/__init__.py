@@ -24,13 +24,20 @@ Then in app.py:
     from actions import myfeature
     myfeature.register(dispatcher)
 """
-from . import screen, system, web
+from . import memory, screen, session, system, web
 
-__all__ = ["screen", "system", "web"]
+__all__ = ["memory", "screen", "session", "system", "web"]
 
 
-def register_all(dispatcher) -> None:
-    """Convenience: register every handler module's commands at once."""
+def register_all(dispatcher, *, claude_runner=None) -> None:
+    """Convenience: register every handler module's commands at once.
+
+    `claude_runner` (optional) is passed to handlers that interact with
+    the Claude pipeline (/clear, /fork, /cost). Without it those become
+    no-ops with a friendly message.
+    """
     screen.register(dispatcher)
     system.register(dispatcher)
     web.register(dispatcher)
+    memory.register(dispatcher)
+    session.register(dispatcher, runner=claude_runner)

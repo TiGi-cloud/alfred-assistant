@@ -1,0 +1,52 @@
+{
+  "test:c": [
+    {
+      "ts": 1777796985.340872,
+      "in": 42,
+      "out": 3,
+      "cache_read": 0,
+      "cache_write": 0,
+      "model": "default"
+    },
+    {
+      "ts": 1777796985.4007092,
+      "in": 42,
+      "out": 3,
+      "cache_read": 0,
+      "cache_write": 0,
+      "model": "default"
+    },
+    {
+      "ts": 1777796985.5048478,
+      "in": 42,
+      "out": 8,
+      "cache_read": 0,
+      "cache_write": 0,
+      "model": "default"
+    },
+    {
+      "ts": 1777797025.126188,
+      "in": 42,
+      "out": 3,
+      "cache_read": 0,
+      "cache_write": 0,
+      "model": "default"
+    },
+    {
+      "ts": 1777797025.190279,
+      "in": 42,
+      "out": 3,
+      "cache_read": 0,
+      "cache_write": 0,
+      "model": "default"
+    },
+    {
+      "ts": 1777797025.265176,
+      "in": 42,
+      "out": 8,
+      "cache_read": 0,
+      "cache_write": 0,
+      "model": "default"
+    }
+  ]
+}

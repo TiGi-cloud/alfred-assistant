@@ -625,10 +625,15 @@ async def test_actions() -> None:
     actions.register_all(d)
     commands = sorted(d._commands.keys())
     expected = {
-        "apps", "battery", "camera", "clipboard", "focus", "help", "ip",
-        "ocr", "open", "paste", "ping", "processes", "record", "screenshot",
-        "search", "shortcut", "status", "tts", "uptime", "volume", "watch",
-        "whoami", "wifi",
+        # screen
+        "camera", "ocr", "record", "screenshot", "watch",
+        # system
+        "apps", "battery", "clipboard", "focus", "ip", "paste", "processes",
+        "search", "shortcut", "status", "tts", "uptime", "volume", "wifi",
+        # web
+        "help", "open", "ping", "whoami",
+        # session (memory + claude)
+        "clear", "cost", "fork", "memory",
     }
     expect(set(commands) == expected,
            f"actions.register_all registers exactly {len(expected)} commands",
@@ -687,6 +692,142 @@ async def test_actions() -> None:
     await d._dispatch_message(fake, msg3)
     expect(captured and "Alfred" in captured[0] and "/screenshot" in captured[0],
            "/help → menu mentioning Alfred and at least one command")
+
+
+# ---------------------------------------------------------------------------
+# 9d) Session + Memory commands (/clear /fork /cost /memory)
+# ---------------------------------------------------------------------------
+async def test_session_memory() -> None:
+    section("Session + memory commands — /clear /fork /cost /memory")
+
+    from kernel import (Chat, ChatAdapter, Message, MessageKind, SentMessage,
+                        User)
+    from kernel.claude import ClaudeRunner
+    from kernel.runner import Context, Dispatcher
+
+    sends: list[str] = []
+
+    class CaptureAdapter(ChatAdapter):
+        name = "test"
+        async def start(self): pass
+        async def stop(self): pass
+        async def messages(self):
+            if False: yield  # pragma: no cover
+        async def callbacks(self):
+            if False: yield  # pragma: no cover
+        async def send_text(self, chat_id, text, **kw):
+            sends.append(text)
+            return SentMessage(chat_id=chat_id, message_id="0")
+        async def edit_text(self, sent, text, **kw): pass
+        async def delete(self, sent): pass
+        async def send_photo(self, *a, **kw): pass
+        async def send_video(self, *a, **kw): pass
+        async def send_voice(self, *a, **kw): pass
+        async def send_document(self, *a, **kw): pass
+        async def send_typing(self, chat_id): pass
+        async def authorize(self, user): return True
+        async def download_attachment(self, att, dest=None): return Path()
+
+    sessions = Path(tempfile.gettempdir()) / "alfred-test-sm-sessions.json"
+    forks = Path(tempfile.gettempdir()) / "alfred-test-sm-forks.json"
+    usage = Path(tempfile.gettempdir()) / "alfred-test-sm-usage.json"
+    for f in (sessions, forks, usage):
+        if f.exists():
+            f.unlink()
+
+    runner = ClaudeRunner(sessions_path=sessions, forks_path=forks, usage_path=usage)
+
+    import actions
+    d = Dispatcher()
+    actions.register_all(d, claude_runner=runner)
+
+    fake_adapter = CaptureAdapter()
+
+    async def dispatch(text: str, chat: str = "c1", user: str = "u1") -> None:
+        sends.clear()
+        m = Message(id="x", chat=Chat(id=chat), user=User(id=user),
+                    kind=MessageKind.COMMAND, text=text)
+        await d._dispatch_message(fake_adapter, m)
+
+    # /clear with no session does no harm
+    await dispatch("/clear")
+    expect("New conversation" in (sends[0] if sends else ""),
+           "/clear → friendly confirmation")
+
+    # Inject a session manually, then /fork save / load / delete cycle
+    runner._sessions["test:c1"] = "sess-aaa"
+    runner._save_sessions()
+
+    await dispatch("/fork save experiment")
+    expect("Saved" in (sends[0] if sends else ""), "/fork save → confirms")
+    forks_data = json.loads(forks.read_text())
+    expect(forks_data.get("test:c1", {}).get("experiment") == "sess-aaa",
+           "fork written to disk")
+
+    # Switch to a different session, then load brings us back
+    runner._sessions["test:c1"] = "sess-bbb"
+    runner._save_sessions()
+    await dispatch("/fork load experiment")
+    expect(runner.session_id_for("c1") if hasattr(runner, "session_id_for") else
+           runner._sessions["test:c1"] == "sess-aaa",
+           "/fork load restores saved session id")
+
+    await dispatch("/fork")
+    expect("experiment" in (sends[0] if sends else ""), "/fork lists branches")
+
+    await dispatch("/fork delete experiment")
+    expect("Deleted" in (sends[0] if sends else ""), "/fork delete → confirms")
+    forks_data = json.loads(forks.read_text())
+    expect(not forks_data.get("test:c1", {}),
+           "fork removed from disk")
+
+    # /cost on empty usage
+    await dispatch("/cost")
+    expect("No usage" in (sends[0] if sends else ""),
+           "/cost on empty usage → friendly")
+
+    # Inject some usage records and check formatting
+    ctx = Context(adapter=fake_adapter,
+                  message=Message(id="x", chat=Chat(id="c1"), user=User(id="u1"),
+                                  kind=MessageKind.TEXT, text=""))
+    runner._record_usage(ctx, {"input_tokens": 1000, "output_tokens": 500}, "claude-sonnet-4-6")
+    runner._record_usage(ctx, {"input_tokens": 2000, "output_tokens": 800}, "claude-opus-4-7")
+    await dispatch("/cost")
+    body = sends[0] if sends else ""
+    expect("Tokens" in body and "1,000" not in body and "3,000" in body,
+           "/cost sums input tokens correctly")
+    expect("$" in body and "By model" in body,
+           "/cost shows estimated cost + per-model breakdown")
+
+    # /memory add / search / list / remove / clear
+    await dispatch("/memory clear")
+    expect("Cleared" in (sends[0] if sends else ""), "/memory clear → confirms")
+
+    await dispatch("/memory add I like dark mode")
+    expect("Remembered" in (sends[0] if sends else ""), "/memory add → confirms")
+
+    await dispatch("/memory add preference Coffee black no sugar")
+    expect("Remembered" in (sends[0] if sends else ""), "/memory add with category")
+
+    await dispatch("/memory")
+    listing = sends[0] if sends else ""
+    expect("dark mode" in listing and "Coffee" in listing,
+           "/memory lists stored memories")
+
+    await dispatch("/memory search dark")
+    expect("dark mode" in (sends[0] if sends else ""),
+           "/memory search filters")
+
+    # Cleanup
+    for f in (sessions, forks, usage):
+        if f.exists():
+            f.unlink()
+    # Also clear test memories from the SQLite store
+    try:
+        from utils.memory import clear_memories
+        clear_memories("test:u1")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -908,6 +1049,7 @@ async def amain() -> int:
     test_adapter_serialisation()
     await test_actions()
     await test_claude_runner()
+    await test_session_memory()
     test_app_smoke()
 
     print(f"\n  Summary: {GREEN}{_pass} passed{RESET}, "

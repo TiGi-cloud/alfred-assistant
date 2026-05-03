@@ -63,9 +63,22 @@ Automation
   /shortcut [name]     — list or run Siri Shortcuts
   /focus               — toggle Do Not Disturb (needs a Shortcut)
 
+Conversation
+  /clear               — start a fresh Claude conversation
+  /fork [save|load|delete] <name> — branch / switch branches
+  /cost                — token usage + estimated cost for this chat
+
+Memory (long-term recall across conversations)
+  /memory              — list what I remember about you
+  /memory add <fact>   — store a fact
+  /memory search <q>   — search remembered facts
+  /memory remove <id>  — forget one
+  /memory clear        — forget everything
+
 Other
   /ping                — sanity check
   /whoami              — your identity on this adapter
+  /open <url|app>      — open URL or app on the Mac
   /help                — this menu
 """
     await ctx.reply(body)

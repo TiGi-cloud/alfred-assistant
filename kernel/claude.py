@@ -137,23 +137,35 @@ class ClaudeRunner:
     model: Optional[str] = None
     cwd: Optional[Path] = None
     sessions_path: Optional[Path] = None
+    forks_path: Optional[Path] = None
+    usage_path: Optional[Path] = None
     edit_throttle_secs: float = 1.5
     max_output_bytes: int = 4 * 1024 * 1024
+    max_usage_records: int = 200          # per chat
     extra_env: dict[str, str] = field(default_factory=dict)
+    extract_memories: bool = True
+    inject_memories: bool = True
 
     # Internal
     _sessions: dict[str, str] = field(default_factory=dict, init=False)
+    _forks: dict[str, dict[str, str]] = field(default_factory=dict, init=False)
+    _usage: dict[str, list[dict]] = field(default_factory=dict, init=False)
     _user_context_path: Path | None = field(default=None, init=False)
 
     # ---------------------------------------------------------------------
     def __post_init__(self) -> None:
+        base = Path(__file__).resolve().parent.parent
         if self.sessions_path is None:
-            self.sessions_path = Path(__file__).resolve().parent.parent / "claude_sessions.json"
+            self.sessions_path = base / "claude_sessions.json"
+        if self.forks_path is None:
+            self.forks_path = base / "claude_forks.json"
+        if self.usage_path is None:
+            self.usage_path = base / "claude_usage.json"
         if self.cwd is None:
             self.cwd = Path.cwd()
         # Auto-load USER_CONTEXT.md (extra system-prompt context the user
         # provides — see config.py).
-        ctx_path = Path(__file__).resolve().parent.parent / "USER_CONTEXT.md"
+        ctx_path = base / "USER_CONTEXT.md"
         if ctx_path.exists():
             self._user_context_path = ctx_path
             try:
@@ -164,38 +176,110 @@ class ClaudeRunner:
                 )
             except Exception:
                 pass
-        self._load_sessions()
+        self._load_all()
 
-    # -- Sessions ----------------------------------------------------------
-    def _load_sessions(self) -> None:
-        if self.sessions_path and self.sessions_path.exists():
-            try:
-                self._sessions = json.loads(self.sessions_path.read_text())
-            except Exception:
-                self._sessions = {}
+    # -- Persistence -------------------------------------------------------
+    @staticmethod
+    def _load_json(path: Optional[Path], default):
+        if path is None or not path.exists():
+            return default
+        try:
+            return json.loads(path.read_text())
+        except Exception:
+            return default
 
-    def _save_sessions(self) -> None:
-        if self.sessions_path is None:
+    @staticmethod
+    def _save_json(path: Optional[Path], data) -> None:
+        if path is None:
             return
         try:
-            self.sessions_path.write_text(json.dumps(self._sessions, indent=2))
+            path.write_text(json.dumps(data, indent=2))
         except Exception:
-            logger.warning("Failed to persist sessions to %s", self.sessions_path)
+            logger.warning("Failed to persist %s", path)
+
+    def _load_all(self) -> None:
+        self._sessions = self._load_json(self.sessions_path, {})
+        self._forks = self._load_json(self.forks_path, {})
+        self._usage = self._load_json(self.usage_path, {})
+
+    def _save_sessions(self) -> None:
+        self._save_json(self.sessions_path, self._sessions)
+
+    def _save_forks(self) -> None:
+        self._save_json(self.forks_path, self._forks)
+
+    def _save_usage(self) -> None:
+        self._save_json(self.usage_path, self._usage)
 
     def _key(self, ctx: Context) -> str:
         return f"{ctx.adapter.name}:{ctx.chat_id}"
+
+    def _user_key(self, ctx: Context) -> str:
+        return f"{ctx.adapter.name}:{ctx.user.id}"
+
+    # -- Sessions ----------------------------------------------------------
+    def session_id(self, ctx: Context) -> Optional[str]:
+        return self._sessions.get(self._key(ctx))
 
     def clear_session(self, ctx: Context) -> None:
         """Drop the persisted session id for this chat (start a fresh thread)."""
         self._sessions.pop(self._key(ctx), None)
         self._save_sessions()
 
+    # -- Forks (named branches) -------------------------------------------
+    def list_forks(self, ctx: Context) -> dict[str, str]:
+        return dict(self._forks.get(self._key(ctx), {}))
+
+    def save_fork(self, ctx: Context, name: str) -> bool:
+        sid = self.session_id(ctx)
+        if not sid:
+            return False
+        self._forks.setdefault(self._key(ctx), {})[name] = sid
+        self._save_forks()
+        return True
+
+    def load_fork(self, ctx: Context, name: str) -> bool:
+        sid = self._forks.get(self._key(ctx), {}).get(name)
+        if not sid:
+            return False
+        self._sessions[self._key(ctx)] = sid
+        self._save_sessions()
+        return True
+
+    def delete_fork(self, ctx: Context, name: str) -> bool:
+        forks = self._forks.get(self._key(ctx), {})
+        if name in forks:
+            forks.pop(name)
+            self._save_forks()
+            return True
+        return False
+
+    # -- Usage tracking ----------------------------------------------------
+    def usage_for(self, ctx: Context) -> list[dict]:
+        return list(self._usage.get(self._key(ctx), []))
+
+    def _record_usage(self, ctx: Context, usage: dict, model: Optional[str]) -> None:
+        if not usage:
+            return
+        records = self._usage.setdefault(self._key(ctx), [])
+        records.append({
+            "ts": time.time(),
+            "in": int(usage.get("input_tokens", 0) or 0),
+            "out": int(usage.get("output_tokens", 0) or 0),
+            "cache_read": int(usage.get("cache_read_input_tokens", 0) or 0),
+            "cache_write": int(usage.get("cache_creation_input_tokens", 0) or 0),
+            "model": model or self.model or "default",
+        })
+        if len(records) > self.max_usage_records:
+            self._usage[self._key(ctx)] = records[-self.max_usage_records:]
+        self._save_usage()
+
     # -- Command building --------------------------------------------------
     def _build_cmd(self, ctx: Context) -> list[str]:
         cmd = [
             _resolve_claude_bin(), "-p",
             "--dangerously-skip-permissions",
-            "--system-prompt", self.system_prompt,
+            "--system-prompt", self._build_system_prompt_for(ctx),
             "--output-format", "stream-json",
             "--verbose",
         ]
@@ -207,8 +291,7 @@ class ClaudeRunner:
 
     # -- Marker handling ---------------------------------------------------
     async def _handle_markers(self, ctx: Context, text: str) -> str:
-        """Process [SEND_FILE:...] markers, send the files, return the cleaned text."""
-        sent_files: list[str] = []
+        """Process [SEND_FILE:...] and [REMEMBER:...] markers, return cleaned text."""
         for m in _SEND_FILE_RE.finditer(text):
             path = m.group(1).strip()
             if not os.path.exists(path):
@@ -224,15 +307,39 @@ class ClaudeRunner:
                     await ctx.adapter.send_voice(ctx.chat_id, path)
                 else:
                     await ctx.adapter.send_document(ctx.chat_id, path)
-                sent_files.append(path)
             except Exception:
                 logger.exception("Failed to send file %s", path)
 
+        # Extract [REMEMBER:cat:fact] entries → persistent memory
+        if self.extract_memories:
+            for m in _REMEMBER_RE.finditer(text):
+                category = m.group(1).strip().lower()
+                fact = m.group(2).strip()
+                if fact:
+                    try:
+                        from utils.memory import add_memory
+                        add_memory(self._user_key(ctx), fact, category=category)
+                        logger.info("Memory remembered for %s: [%s] %s",
+                                    self._user_key(ctx), category, fact[:60])
+                    except Exception:
+                        logger.exception("Memory persistence failed")
+
         cleaned = _SEND_FILE_RE.sub("", text)
-        # Strip [REMEMBER:...] from the user-visible text (memory module
-        # would extract these — TODO when memory is ported).
         cleaned = _REMEMBER_RE.sub("", cleaned)
         return cleaned.strip()
+
+    # -- Memory injection --------------------------------------------------
+    def _build_system_prompt_for(self, ctx: Context) -> str:
+        prompt = self.system_prompt
+        if self.inject_memories:
+            try:
+                from utils.memory import format_memories_for_prompt
+                mem = format_memories_for_prompt(self._user_key(ctx), max_chars=2000)
+                if mem:
+                    prompt = prompt + "\n\n[USER MEMORY: " + mem + "]"
+            except Exception:
+                logger.exception("Memory injection failed")
+        return prompt
 
     # -- Main entry --------------------------------------------------------
     async def run(
@@ -378,10 +485,12 @@ class ClaudeRunner:
             proc.returncode, len(accumulated), session_id, usage,
         )
 
-        # 6. Persist session
+        # 6. Persist session and usage
         if session_id:
             self._sessions[self._key(ctx)] = session_id
             self._save_sessions()
+        if usage:
+            self._record_usage(ctx, usage, self.model)
 
         # 7. Stale-session retry: if claude returned "no conversation found",
         #    drop our cached session and try once more.

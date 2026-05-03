@@ -211,7 +211,7 @@ async def run() -> None:
         sys.exit(2)
 
     dispatcher = Dispatcher(default_handler=default_text)
-    alfred_actions.register_all(dispatcher)
+    alfred_actions.register_all(dispatcher, claude_runner=_get_claude())
 
     # Start every adapter
     for a in adapters:
