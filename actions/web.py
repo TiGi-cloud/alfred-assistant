@@ -63,6 +63,12 @@ Automation
   /shortcut [name]     — list or run Siri Shortcuts
   /focus               — toggle Do Not Disturb (needs a Shortcut)
 
+Multi-machine
+  /machine             — list / switch SSH targets
+  /machine add <name> <host> [<MAC>]
+  /machine remove <name>
+  /wake <name>         — Wake-on-LAN (machine must have a MAC)
+
 Reminders + scheduling
   /remind in 10 min …  — one-shot reminder
   /timer 5 [label]     — quick timer in N minutes

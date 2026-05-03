@@ -637,6 +637,8 @@ async def test_actions() -> None:
         "clear", "cost", "fork", "memory",
         # scheduler
         "alert", "remind", "schedule", "timer",
+        # machines
+        "machine", "wake",
     }
     expect(set(commands) == expected,
            f"actions.register_all registers exactly {len(expected)} commands",
@@ -831,6 +833,118 @@ async def test_session_memory() -> None:
         clear_memories("test:u1")
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# 9f) Multi-machine registry — /machine + /wake
+# ---------------------------------------------------------------------------
+def test_machines() -> None:
+    section("Multi-machine registry — MachineRegistry + Wake-on-LAN packet")
+
+    from kernel.machines import MachineRegistry, normalise_mac, send_wol
+
+    # MAC normalisation
+    expect(normalise_mac("AA:BB:CC:DD:EE:FF") == "AA:BB:CC:DD:EE:FF",
+           "normalise_mac canonical form")
+    expect(normalise_mac("aa-bb-cc-dd-ee-ff") == "AA:BB:CC:DD:EE:FF",
+           "normalise_mac dashes → colons + uppercase")
+    expect(normalise_mac("AABBCCDDEEFF") == "AA:BB:CC:DD:EE:FF",
+           "normalise_mac no separator")
+    try:
+        normalise_mac("not a mac")
+        fail("normalise_mac should raise on garbage")
+    except ValueError:
+        ok("normalise_mac rejects garbage")
+
+    # WoL packet — send to a localhost UDP listener and verify magic packet
+    import socket
+    import threading
+
+    received = []
+    listener_ready = threading.Event()
+
+    def listen():
+        srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 65009))
+        srv.settimeout(2)
+        listener_ready.set()
+        try:
+            data, _ = srv.recvfrom(2048)
+            received.append(data)
+        except socket.timeout:
+            pass
+        finally:
+            srv.close()
+
+    t = threading.Thread(target=listen, daemon=True)
+    t.start()
+    listener_ready.wait()
+    # Send to our listener (override broadcast for the test)
+    send_wol("AA:BB:CC:DD:EE:FF", broadcast="127.0.0.1", port=65009)
+    t.join(timeout=3)
+    expect(len(received) == 1, "WoL packet received on test socket")
+    if received:
+        pkt = received[0]
+        expect(len(pkt) == 102, f"WoL packet is 102 bytes (got {len(pkt)})")
+        expect(pkt.startswith(b"\xff" * 6), "starts with 6 × 0xFF sync stream")
+        mac_bytes = bytes.fromhex("AABBCCDDEEFF")
+        expect(pkt.count(mac_bytes) == 16, "MAC repeated 16 times in payload")
+
+    # Registry CRUD + active selection
+    state = Path(tempfile.gettempdir()) / "alfred-test-machines.json"
+    if state.exists():
+        state.unlink()
+    reg = MachineRegistry(state_path=state)
+    reg.add("prod", host="alice@prod.example.com", mac="AA:BB:CC:DD:EE:FF")
+    reg.add("dev", host="alice@dev.example.com")
+    expect("prod" in reg.list_machines(), "machine 'prod' added")
+
+    # Persistence round-trip
+    reg2 = MachineRegistry(state_path=state)
+    expect("prod" in reg2.list_machines() and "dev" in reg2.list_machines(),
+           "machines persist to disk")
+
+    # Active selection per (adapter, user)
+    from kernel import Chat, ChatAdapter, Message, MessageKind, SentMessage, User
+    from kernel.runner import Context
+
+    class FA(ChatAdapter):
+        name = "test"
+        async def start(self): pass
+        async def stop(self): pass
+        async def messages(self):
+            if False: yield  # pragma: no cover
+        async def callbacks(self):
+            if False: yield  # pragma: no cover
+        async def send_text(self, *a, **kw): return SentMessage(chat_id="c", message_id="0")
+        async def edit_text(self, *a, **kw): pass
+        async def delete(self, *a, **kw): pass
+        async def send_photo(self, *a, **kw): pass
+        async def send_video(self, *a, **kw): pass
+        async def send_voice(self, *a, **kw): pass
+        async def send_document(self, *a, **kw): pass
+        async def send_typing(self, *a, **kw): pass
+        async def authorize(self, user): return True
+        async def download_attachment(self, att, dest=None): return Path()
+
+    fa = FA()
+    ctx = Context(adapter=fa,
+                  message=Message(id="x", chat=Chat(id="c"), user=User(id="u1"),
+                                  kind=MessageKind.TEXT, text=""))
+    expect(reg.get_active(ctx) == "local", "default active is 'local'")
+    reg.set_active(ctx, "prod")
+    expect(reg.get_active(ctx) == "prod", "set_active changes pointer")
+    reg.set_active(ctx, "local")
+    expect(reg.get_active(ctx) == "local", "set_active 'local' resets")
+
+    # Removing a machine drops anyone who had it active
+    reg.set_active(ctx, "prod")
+    reg.remove("prod")
+    expect(reg.get_active(ctx) == "local", "removing active machine resets to 'local'")
+
+    if state.exists():
+        state.unlink()
 
 
 # ---------------------------------------------------------------------------
@@ -1174,6 +1288,7 @@ async def amain() -> int:
     test_applescript_syntax()
     test_adapter_serialisation()
     await test_actions()
+    test_machines()
     await test_scheduler()
     await test_claude_runner()
     await test_session_memory()

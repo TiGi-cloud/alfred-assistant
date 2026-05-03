@@ -24,17 +24,25 @@ Then in app.py:
     from actions import myfeature
     myfeature.register(dispatcher)
 """
-from . import memory, scheduler, screen, session, system, web
+from . import machines, memory, scheduler, screen, session, system, web
 
-__all__ = ["memory", "scheduler", "screen", "session", "system", "web"]
+__all__ = ["machines", "memory", "scheduler", "screen", "session", "system", "web"]
 
 
-def register_all(dispatcher, *, claude_runner=None, scheduler_instance=None) -> None:
+def register_all(
+    dispatcher,
+    *,
+    claude_runner=None,
+    scheduler_instance=None,
+    machines_registry=None,
+) -> None:
     """Convenience: register every handler module's commands at once.
 
-    `claude_runner` (optional) is forwarded to /clear /fork /cost.
-    `scheduler_instance` (optional) is forwarded to /remind /timer /schedule /alert.
-    Either becomes a no-op (with a friendly message) when not supplied.
+    Optional dependencies:
+      `claude_runner`     → /clear /fork /cost
+      `scheduler_instance`→ /remind /timer /schedule /alert
+      `machines_registry` → /machine /wake
+    Modules without their dependency become friendly no-ops.
     """
     screen.register(dispatcher)
     system.register(dispatcher)
@@ -42,3 +50,4 @@ def register_all(dispatcher, *, claude_runner=None, scheduler_instance=None) -> 
     memory.register(dispatcher)
     session.register(dispatcher, runner=claude_runner)
     scheduler.register(dispatcher, scheduler=scheduler_instance)
+    machines.register(dispatcher, registry=machines_registry)

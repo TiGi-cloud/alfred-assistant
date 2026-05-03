@@ -43,6 +43,7 @@ from adapters.web import WebAdapter
 from kernel import ChatAdapter
 from kernel.claude import ClaudeRunner
 from kernel.runner import Context, Dispatcher
+from kernel.machines import MachineRegistry
 from kernel.scheduler import Scheduler
 import actions as alfred_actions
 
@@ -213,12 +214,14 @@ async def run() -> None:
 
     dispatcher = Dispatcher(default_handler=default_text)
     scheduler = Scheduler()
+    machines_registry = MachineRegistry()
     for a in adapters:
         scheduler.register_adapter(a)
     alfred_actions.register_all(
         dispatcher,
         claude_runner=_get_claude(),
         scheduler_instance=scheduler,
+        machines_registry=machines_registry,
     )
 
     # Start every adapter, then the scheduler
