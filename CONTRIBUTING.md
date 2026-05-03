@@ -16,44 +16,47 @@ python3 app.py --setup
 
 ## Architecture overview
 
-The repo is mid-refactor from a Telegram-only bot to a multi-adapter design:
-
 ```
-kernel/                        ← platform-agnostic types
+kernel/                        ← platform-agnostic core
   messages.py                  ← Message, User, Chat, Attachment, CallbackPress
   buttons.py                   ← Button, Keyboard
   adapter.py                   ← ChatAdapter abstract base class
   runner.py                    ← Dispatcher + Context
+  claude.py                    ← Claude pipeline (subprocess + stream-json)
+  scheduler.py                 ← reminders + cron + threshold alerts
+  machines.py                  ← SSH targets + Wake-on-LAN
+  projects.py                  ← per-user named projects (cwd + env + model)
+  browser.py                   ← Playwright pool (headless Chromium)
+  store.py                     ← SQLite KV + persistent memory
 
 adapters/                      ← concrete chat platform integrations
-  telegram.py                  ← wraps python-telegram-bot
+  telegram.py                  ← python-telegram-bot
   web.py                       ← browser chat at http://localhost:8765
+  discord.py                   ← discord.py (optional dep)
+  slack.py                     ← slack-bolt async, Socket Mode (optional dep)
+  imessage.py                  ← macOS Messages.app (chat.db + AppleScript)
 
-app.py                         ← new multi-adapter entry point
+actions/                       ← platform-agnostic command handlers
+  screen.py system.py web.py memory.py session.py scheduler.py
+  machines.py projects.py menu.py notifications.py research.py
+  gmail.py web_browse.py
+
+app.py                         ← single entry point — wires everything up
 setup_wizard.py                ← first-run browser configuration
-
-bot.py + handlers.py +
-webhook.py + commands/*.py +
-core.py                        ← legacy Telegram-only code (still the
-                                 production path; ported into kernel/
-                                 + adapters/ incrementally)
 ```
 
-When adding a new feature today:
+When adding a feature:
 
-- If it's platform-specific Telegram behaviour → land it in `bot.py` /
-  `handlers.py` / `commands/`.
-- If it's platform-agnostic (Claude pipeline, scheduling, alerts, plugins) →
-  land it in `kernel/` and have the legacy code call into it.
-- New chat platforms → add an `adapters/<name>.py` implementing
-  `kernel.ChatAdapter`.
+- Pure platform-agnostic logic (Claude, scheduling, storage) → `kernel/`
+- Slash command implementation → `actions/<topic>.py` exporting `register(d)`
+- New chat platform → `adapters/<name>.py` implementing `kernel.ChatAdapter`
 
 ## What I welcome
 
 - Bug fixes with reproducers.
 - Small, focused PRs (one concern per PR).
-- New adapters (Discord, Slack, Matrix, ...).
-- Porting commands from the legacy code into the kernel/dispatcher pattern.
+- New adapters (Matrix, Discord webhooks, IRC, ...).
+- New `actions/` modules — anything that can run from `Context`.
 - Cross-platform improvements (Linux paths, Docker support, ...).
 - Documentation, examples, screenshots.
 

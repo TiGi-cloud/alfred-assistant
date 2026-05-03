@@ -172,27 +172,21 @@ cd alfred-assistant
 pip3 install -r requirements.txt
 brew install ffmpeg imagesnap        # imagesnap optional, used by /camera
 
-# 2. Create a Telegram bot via @BotFather and copy the token
+# 2. Create a Telegram bot via @BotFather and copy the token (or
+#    set up Discord / Slack — see .env.example for details)
 
 # 3. Copy and edit the env template
 cp .env.example .env
-# fill in TELEGRAM_BOT_TOKEN, ALLOWED_USERS, etc.
 
 # 4. Run
-python3 app.py             # multi-adapter (Telegram + browser chat)
-# or
-python3 bot.py             # legacy entry point — Telegram only, full feature set
+python3 app.py
 ```
 
-### Two entry points (during the multi-chat refactor)
+### One entry point
 
-- **`app.py`** — new multi-adapter entry point. Runs Telegram + a local browser
-  chat side-by-side via the `kernel.ChatAdapter` interface. A handful of demo
-  commands are wired (`/ping`, `/whoami`, `/screenshot`); more get ported with
-  every release.
-- **`bot.py`** — legacy entry point. The original full-feature Telegram bot.
-  Use this if you need the complete command set today; switch to `app.py` once
-  the migration completes.
+`app.py` is the only entry point. It loads adapters from `.env` and starts
+each one alongside a shared dispatcher, scheduler, project + machine
+registry, and Claude pipeline.
 
 ### Auto-start on boot (optional)
 

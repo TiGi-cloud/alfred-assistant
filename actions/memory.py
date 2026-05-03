@@ -20,8 +20,7 @@ import time
 
 from kernel.runner import Context
 
-# Reuse the existing memory storage layer (SQLite-backed via db.py).
-from utils.memory import (  # noqa: E402
+from kernel.store import (  # noqa: E402
     add_memory, clear_memories, delete_memory, load_memories, search_memories,
 )
 

@@ -364,7 +364,7 @@ class ClaudeRunner:
                 fact = m.group(2).strip()
                 if fact:
                     try:
-                        from utils.memory import add_memory
+                        from .store import add_memory
                         add_memory(self._user_key(ctx), fact, category=category)
                         logger.info("Memory remembered for %s: [%s] %s",
                                     self._user_key(ctx), category, fact[:60])
@@ -381,7 +381,7 @@ class ClaudeRunner:
         prompt = self.system_prompt
         if self.inject_memories:
             try:
-                from utils.memory import format_memories_for_prompt
+                from .store import format_memories_for_prompt
                 mem = format_memories_for_prompt(self._user_key(ctx), max_chars=2000)
                 if mem:
                     prompt = prompt + "\n\n[USER MEMORY: " + mem + "]"

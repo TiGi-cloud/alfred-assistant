@@ -1376,24 +1376,20 @@ async def test_claude_runner() -> None:
 # 10) app.py entry-point smoke
 # ---------------------------------------------------------------------------
 def test_app_smoke() -> None:
-    section("app.py + setup_wizard.py + bot.py legacy")
+    section("app.py + setup_wizard.py")
 
-    # app.py with no env: should detect needs_setup → exit cleanly via wizard,
-    # but here we just verify the module loads and the function exists.
     import importlib.util
-    for path in ("app.py", "setup_wizard.py", "bot.py"):
+    for path in ("app.py", "setup_wizard.py"):
         try:
             spec = importlib.util.spec_from_file_location(
                 path.replace(".py", "_test"), ROOT / path
             )
             mod = importlib.util.module_from_spec(spec)
-            # bot.py has side effects on import (raises if no token), so set one
             os.environ.setdefault("TELEGRAM_BOT_TOKEN", "dummy:smoke")
             os.environ.setdefault("ALLOWED_USERS", "ci")
             spec.loader.exec_module(mod)
             ok(f"{path} imports without error")
         except SystemExit as e:
-            # bot.py / app.py may sys.exit at module load on bad env — that's not a fail
             ok(f"{path} imported; exited with {e.code}")
         except Exception as e:
             fail(f"{path} import", e)
