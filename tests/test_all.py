@@ -690,6 +690,183 @@ async def test_actions() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 9c) ClaudeRunner — mock `claude` binary, full pipeline test
+# ---------------------------------------------------------------------------
+async def test_claude_runner() -> None:
+    section("kernel.claude.ClaudeRunner — full pipeline via mock claude binary")
+
+    from kernel import (Chat, ChatAdapter, Message, MessageKind, SentMessage,
+                        User)
+    from kernel.claude import ClaudeRunner
+    from kernel.runner import Context
+
+    fake = ROOT / "tests" / "fake_claude.py"
+    expect(fake.exists() and os.access(fake, os.X_OK), "fake_claude.py is executable")
+
+    # Capture every adapter call
+    edits: list[tuple[str, str]] = []
+    sends: list[tuple[str, str]] = []
+    photos: list[str] = []
+
+    class CaptureAdapter(ChatAdapter):
+        name = "test"
+        _mid = 0
+        async def start(self): pass
+        async def stop(self): pass
+        async def messages(self):
+            if False: yield  # pragma: no cover
+        async def callbacks(self):
+            if False: yield  # pragma: no cover
+        async def send_text(self, chat_id, text, **kw):
+            self._mid += 1
+            sends.append((chat_id, text))
+            return SentMessage(chat_id=chat_id, message_id=str(self._mid))
+        async def edit_text(self, sent, text, **kw):
+            edits.append((sent.message_id, text))
+        async def delete(self, sent): pass
+        async def send_photo(self, chat_id, path, **kw):
+            photos.append(str(path))
+            return SentMessage(chat_id=chat_id, message_id="0")
+        async def send_video(self, chat_id, path, **kw):
+            photos.append(str(path))
+            return SentMessage(chat_id=chat_id, message_id="0")
+        async def send_voice(self, chat_id, path, **kw):
+            photos.append(str(path))
+            return SentMessage(chat_id=chat_id, message_id="0")
+        async def send_document(self, chat_id, path, **kw):
+            photos.append(str(path))
+            return SentMessage(chat_id=chat_id, message_id="0")
+        async def send_typing(self, chat_id): pass
+        async def authorize(self, user): return True
+        async def download_attachment(self, att, dest=None): return Path()
+
+    sessions_path = Path(tempfile.gettempdir()) / "alfred-test-sessions.json"
+    if sessions_path.exists():
+        sessions_path.unlink()
+
+    args_log = Path(tempfile.gettempdir()) / "fake-claude-args.log"
+    if args_log.exists():
+        args_log.unlink()
+
+    base_env = {
+        "CLAUDE_BIN": str(fake),
+        "FAKE_CLAUDE_TEXT": "Hello from Claude.",
+        "FAKE_CLAUDE_SESSION": "sess-abc",
+        "FAKE_CLAUDE_RECORD_ARGS": str(args_log),
+    }
+
+    # --- 1. Plain text round trip ---
+    for k, v in base_env.items():
+        os.environ[k] = v
+    try:
+        adapter = CaptureAdapter()
+        runner = ClaudeRunner(sessions_path=sessions_path, edit_throttle_secs=0)
+        ctx = Context(
+            adapter=adapter,
+            message=Message(id="1", chat=Chat(id="c"), user=User(id="u"),
+                            kind=MessageKind.TEXT, text="hi"),
+        )
+        result = await runner.run(ctx, "hi")
+        expect(result == "Hello from Claude.", "runner returns final text",
+               f"got {result!r}")
+        expect(any("Hello" in t for _, t in edits) or any("Hello" in t for _, t in sends),
+               "final text edited into the thinking message", str(edits + sends))
+    finally:
+        for k in base_env:
+            os.environ.pop(k, None)
+
+    # --- 2. Session persisted ---
+    expect(sessions_path.exists(), "claude_sessions.json written")
+    if sessions_path.exists():
+        data = json.loads(sessions_path.read_text())
+        expect(data.get("test:c") == "sess-abc",
+               "session id keyed by adapter:chat", str(data))
+
+    # --- 3. --resume <id> on next call ---
+    edits.clear(); sends.clear()
+    if args_log.exists():
+        args_log.unlink()
+    base_env["FAKE_CLAUDE_RECORD_ARGS"] = str(args_log)
+    for k, v in base_env.items():
+        os.environ[k] = v
+    try:
+        adapter = CaptureAdapter()
+        runner = ClaudeRunner(sessions_path=sessions_path, edit_throttle_secs=0)
+        ctx = Context(
+            adapter=adapter,
+            message=Message(id="2", chat=Chat(id="c"), user=User(id="u"),
+                            kind=MessageKind.TEXT, text="hi again"),
+        )
+        await runner.run(ctx, "hi again")
+        argv = args_log.read_text() if args_log.exists() else ""
+        expect("--resume" in argv and "sess-abc" in argv,
+               "second run passes --resume <session_id>")
+    finally:
+        for k in base_env:
+            os.environ.pop(k, None)
+
+    # --- 4. [SEND_FILE:...] marker → send_photo called, marker stripped from text ---
+    edits.clear(); sends.clear(); photos.clear()
+    fake_image = Path(tempfile.gettempdir()) / "alfred-test-image.png"
+    fake_image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+
+    env = dict(base_env)
+    env["FAKE_CLAUDE_TEXT"] = (
+        f"Here's the screenshot you asked for. [SEND_FILE:{fake_image}] Done."
+    )
+    for k, v in env.items():
+        os.environ[k] = v
+    try:
+        adapter = CaptureAdapter()
+        runner = ClaudeRunner(sessions_path=sessions_path, edit_throttle_secs=0)
+        ctx = Context(
+            adapter=adapter,
+            message=Message(id="3", chat=Chat(id="c"), user=User(id="u"),
+                            kind=MessageKind.TEXT, text="screenshot please"),
+        )
+        result = await runner.run(ctx, "screenshot please")
+        expect(str(fake_image) in photos, "send_photo invoked with the marker path")
+        expect("[SEND_FILE:" not in result, "marker stripped from final text")
+        expect("Here's the screenshot" in result and "Done" in result,
+               "non-marker text preserved")
+    finally:
+        for k in env:
+            os.environ.pop(k, None)
+        if fake_image.exists():
+            fake_image.unlink()
+
+    # --- 5. Non-zero exit → friendly error message ---
+    edits.clear(); sends.clear()
+    env = dict(base_env)
+    env["FAKE_CLAUDE_FAIL"] = "1"
+    env["FAKE_CLAUDE_STDERR"] = "boom: synthetic error"
+    for k, v in env.items():
+        os.environ[k] = v
+    try:
+        adapter = CaptureAdapter()
+        runner = ClaudeRunner(sessions_path=sessions_path, edit_throttle_secs=0)
+        ctx = Context(
+            adapter=adapter,
+            message=Message(id="4", chat=Chat(id="c"), user=User(id="u"),
+                            kind=MessageKind.TEXT, text="will fail"),
+        )
+        result = await runner.run(ctx, "will fail")
+        expect(result == "", "failed run returns empty string")
+        all_text = " ".join(t for _, t in edits + sends)
+        expect("boom" in all_text or "❌" in all_text,
+               "stderr surfaced to chat as friendly error", all_text[:200])
+    finally:
+        for k in env:
+            os.environ.pop(k, None)
+
+    # Cleanup
+    if sessions_path.exists():
+        sessions_path.unlink()
+    if args_log.exists():
+        args_log.unlink()
+
+
+# ---------------------------------------------------------------------------
 # 10) app.py entry-point smoke
 # ---------------------------------------------------------------------------
 def test_app_smoke() -> None:
@@ -730,6 +907,7 @@ async def amain() -> int:
     test_applescript_syntax()
     test_adapter_serialisation()
     await test_actions()
+    await test_claude_runner()
     test_app_smoke()
 
     print(f"\n  Summary: {GREEN}{_pass} passed{RESET}, "

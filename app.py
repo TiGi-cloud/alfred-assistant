@@ -41,6 +41,7 @@ except ImportError:
 from adapters.telegram import TelegramAdapter
 from adapters.web import WebAdapter
 from kernel import ChatAdapter
+from kernel.claude import ClaudeRunner
 from kernel.runner import Context, Dispatcher
 import actions as alfred_actions
 
@@ -48,20 +49,39 @@ import actions as alfred_actions
 # so missing optional dependencies (discord.py, slack-bolt) don't break
 # users who only run Telegram + Web.
 
+# Single shared Claude pipeline. Built lazily so unit tests that import
+# this module don't try to spawn the binary.
+_claude_runner: ClaudeRunner | None = None
+
+
+def _get_claude() -> ClaudeRunner:
+    global _claude_runner
+    if _claude_runner is None:
+        _claude_runner = ClaudeRunner(
+            model=os.environ.get("CLAUDE_MODEL") or None,
+        )
+    return _claude_runner
+
 logger = logging.getLogger("alfred.app")
 
 
 async def default_text(ctx: Context) -> None:
-    """Fallback for non-command text. Echoes back for now; the full Claude
-    pipeline will be wired in once the legacy `claude_runner` is decoupled
-    from python-telegram-bot."""
+    """Route any non-command text (and attached media) to Claude."""
     msg = ctx.message
-    if msg and msg.text:
-        await ctx.reply(
-            f"got it ({len(msg.text)} chars). "
-            "Try /help to see available commands. "
-            "Full Claude conversational integration is the next port."
-        )
+    if not msg:
+        return
+    prompt = msg.text or ""
+    if not prompt and not msg.attachments:
+        return
+    if not prompt and msg.attachments:
+        prompt = "User sent an attachment. Describe / process it appropriately."
+
+    runner = _get_claude()
+    try:
+        await runner.run(ctx, prompt, attachments=msg.attachments)
+    except Exception as e:
+        logger.exception("Claude run failed")
+        await ctx.adapter.send_text(ctx.chat_id, f"❌ Claude error: {e}")
 
 
 # ---------------------------------------------------------------------------
