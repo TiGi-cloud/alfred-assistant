@@ -6,12 +6,13 @@ A self-hosted bot that gives you full remote control of your Mac through Claude.
 
 ## Supported chat platforms
 
-| Platform | Setup |
-|---|---|
-| **Telegram** | Free bot token from [@BotFather](https://t.me/BotFather). Always available. |
-| **Web (browser)** | Built in. Opens at `http://localhost:8765`. No external account needed. |
-| **Discord** | Free bot from [Discord Developer Portal](https://discord.com/developers/applications). `pip install 'discord.py>=2.4'`. |
-| **Slack** | Free Slack app with Socket Mode. `pip install 'slack-bolt[async]>=1.18'`. |
+| Platform | Setup | Notes |
+|---|---|---|
+| **Telegram** | Free bot token from [@BotFather](https://t.me/BotFather) | Always available, instant |
+| **Web (browser)** | Built in — opens at `http://localhost:8765` | No external account needed |
+| **Discord** | Free bot from [Discord Developer Portal](https://discord.com/developers/applications) + `pip install 'discord.py>=2.4'` | DMs + servers |
+| **Slack** | Free Slack app with Socket Mode + `pip install 'slack-bolt>=1.18'` | DMs + mentions |
+| **iMessage** | macOS only — Full Disk Access for the Python interpreter | Polls chat.db, sends via AppleScript. 1:1 chats only; group chats not yet supported |
 
 Run any combination — the setup wizard lets you pick.
 

@@ -72,7 +72,7 @@ def _import_bolt():
     except ImportError as e:
         raise RuntimeError(
             "Slack adapter requires `slack-bolt`. Install with: "
-            "pip install 'slack-bolt[async]>=1.18'"
+            "pip install 'slack-bolt>=1.18'"
         ) from e
 
 

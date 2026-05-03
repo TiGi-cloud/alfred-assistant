@@ -5,7 +5,7 @@ Local Slack adapter test harness — NEVER COMMIT.
 Boots ONLY the SlackAdapter and runs an echo + diagnostic loop. Reads tokens
 from the environment so they never get baked into source. Run with:
 
-    pip install 'slack-bolt[async]>=1.18'
+    pip install 'slack-bolt>=1.18'
     SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... \\
         python3 test_slack.py
 

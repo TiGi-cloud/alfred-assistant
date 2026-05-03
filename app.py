@@ -191,6 +191,28 @@ def _build_adapters() -> list[ChatAdapter]:
             "SLACK_APP_TOKEN (xapp-…). Skipping."
         )
 
+    # iMessage (macOS only — opt-in via env var)
+    if os.environ.get("IMESSAGE_ENABLED", "").lower() in ("1", "true", "yes"):
+        if sys.platform != "darwin":
+            logger.warning("IMESSAGE_ENABLED=1 but not on macOS — skipping.")
+        else:
+            try:
+                from adapters.imessage import iMessageAdapter
+            except Exception as e:
+                logger.warning("iMessage adapter unavailable: %s", e)
+            else:
+                allowed = [
+                    h.strip()
+                    for h in os.environ.get("IMESSAGE_ALLOWED_HANDLES", "").split(",")
+                    if h.strip()
+                ]
+                if not allowed:
+                    logger.warning(
+                        "iMessage adapter has no IMESSAGE_ALLOWED_HANDLES — "
+                        "Alfred will accept messages from anyone you DM."
+                    )
+                adapters.append(iMessageAdapter(allowed_handles=allowed))
+
     return adapters
 
 

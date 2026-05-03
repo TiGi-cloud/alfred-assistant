@@ -212,6 +212,25 @@ _SETUP_HTML = """<!doctype html>
     </div>
 
     <div class="card">
+      <h2>iMessage <span class="pill optional">macOS only</span></h2>
+      <div class="help">
+        Polls macOS Messages.app's database and sends via AppleScript. Requires:
+        <ul style="margin: 8px 0 0; padding-left: 20px;">
+          <li><strong>Full Disk Access</strong> for the Python interpreter (System Settings → Privacy & Security)</li>
+          <li><strong>Automation → Messages</strong> permission (auto-prompted on first send)</li>
+          <li>You must be signed into Messages.app with your Apple ID</li>
+        </ul>
+        Group chats are not yet supported — only 1:1 chats.
+      </div>
+      <div class="toggle">
+        <input type="checkbox" name="imessage_enabled" id="imessage_enabled">
+        <label for="imessage_enabled" style="margin: 0; color: var(--fg);">Enable iMessage adapter</label>
+      </div>
+      <label>Allowed handles — phone numbers (+15551234567) or Apple-ID emails, comma-separated</label>
+      <input type="text" name="imessage_allowed_handles" placeholder="+15551234567, you@example.com" autocomplete="off">
+    </div>
+
+    <div class="card">
       <h2>Advanced <span class="pill optional">optional</span></h2>
       <div class="help">Leave blank to use defaults.</div>
       <label>WEBHOOK_SECRET — bearer token for the /webhook endpoint (auto-generated if blank)</label>
@@ -318,6 +337,13 @@ def write_env(path: Path, settings: dict) -> None:
         add("SLACK_APP_TOKEN", settings.get("slack_app_token"))
         add("SLACK_ALLOWED_USER_IDS", settings.get("slack_allowed_user_ids"))
 
+    # iMessage
+    if settings.get("imessage_enabled"):
+        lines.append("")
+        lines.append("# iMessage — macOS Messages.app (chat.db polling + AppleScript)")
+        lines.append("IMESSAGE_ENABLED=1")
+        add("IMESSAGE_ALLOWED_HANDLES", settings.get("imessage_allowed_handles"))
+
     web_enabled = bool(settings.get("web_enabled"))
     if not web_enabled:
         lines.append("WEB_DISABLED=1")
@@ -352,10 +378,11 @@ async def _save(request: web.Request) -> web.Response:
     discord_token = (data.get("discord_bot_token") or "").strip()
     slack_bot = (data.get("slack_bot_token") or "").strip()
     slack_app = (data.get("slack_app_token") or "").strip()
+    imessage_on = bool(data.get("imessage_enabled"))
 
-    if not (token or web_enabled or discord_token or (slack_bot and slack_app)):
+    if not (token or web_enabled or discord_token or (slack_bot and slack_app) or imessage_on):
         return web.json_response(
-            {"ok": False, "error": "Configure at least one chat (Telegram, Web, Discord, or Slack)."},
+            {"ok": False, "error": "Configure at least one chat (Telegram, Web, Discord, Slack, or iMessage)."},
             status=400,
         )
     if token and not allowed_users and not allowed_ids:

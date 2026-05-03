@@ -8,4 +8,4 @@ python-dotenv>=1.0  # used by app.py to load .env
 # Discord:
 #   pip install 'discord.py>=2.4'
 # Slack:
-#   pip install 'slack-bolt[async]>=1.18'
+#   pip install 'slack-bolt>=1.18'
