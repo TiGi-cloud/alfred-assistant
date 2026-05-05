@@ -28,10 +28,14 @@ That's the brief. **Alfred is the assistant — not the protagonist.** No person
 ## Demo
 
 <p align="center">
-  <img src="docs/assets/screenshots/demo.gif" alt="Alfred demo — three turns of chat" width="600">
+  <img src="docs/assets/screenshots/demo.gif" alt="Alfred demo — Vision OCR, code generation, live research" width="640">
 </p>
 
-<sub>20 seconds. Three turns: screenshot, app list, cost. Same brain runs in Telegram, Discord, Slack, iMessage. (Demo screenshot is a mock desktop — the real bot returns your actual Mac.)</sub>
+<sub>~25 seconds, three beats:<br>
+<strong>📸 Vision</strong> — photo of a handwritten note → Vision OCR → reminder set automatically<br>
+<strong>🛠 Build & run</strong> — "build me an ASCII butler" → file written to Desktop, executed, output streamed back<br>
+<strong>🔬 Research</strong> — 15 parallel agents answer in 40 words, streamed live<br>
+Same brain runs in Telegram, Discord, Slack, iMessage. (Mock photo & ASCII art used to keep the public demo privacy-safe.)</sub>
 
 ## What he does
 

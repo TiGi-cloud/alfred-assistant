@@ -88,50 +88,119 @@ async def _drive_conversation(page, web_adapter):
         """)
         await asyncio.sleep(pause)
 
-    # ---- Turn 1: take a screenshot ----------------------------------------
-    await asyncio.sleep(0.6)
-    await type_user("take a screenshot of my desktop")
-    await submit()
-    await bot_thinking()
-
-    # Use a privacy-safe MOCK desktop so the public README doesn't reveal
-    # the host machine's open windows. Generated once by
-    # scripts/_make_mock_desktop.py — regenerate it if the demo flow changes.
-    mock = ROOT / "docs" / "assets" / "screenshots" / "mock-desktop.png"
-    if not mock.exists():
-        # Regenerate on demand if missing
-        subprocess.check_call([sys.executable, str(ROOT / "scripts" / "_make_mock_desktop.py")])
     import base64
-    img_bytes = mock.read_bytes()
-    img_url = "data:image/png;base64," + base64.b64encode(img_bytes).decode()
 
-    await bot_replace_thinking(
-        f'<div>📸 here you go.</div>'
-        f'<img src="{img_url}" alt="screenshot" '
-        f'style="max-height:240px;width:auto;border-radius:6px;margin-top:6px">',
-        pause=2.5,
-    )
+    def data_url(p: Path) -> str:
+        return "data:image/png;base64," + base64.b64encode(p.read_bytes()).decode()
 
-    # ---- Turn 2: open apps -----------------------------------------------
-    await type_user("what apps are open?")
+    note_png = ROOT / "docs" / "assets" / "screenshots" / "mock-note.png"
+    if not note_png.exists():
+        subprocess.check_call([sys.executable, str(ROOT / "scripts" / "_make_mock_desktop.py")])
+
+    # ---- Turn 1: photo of a handwritten note → OCR + reasoning + reminder
+    await asyncio.sleep(0.5)
+    # User sends a photo (we render a small thumbnail in their bubble)
+    await page.evaluate(f"""
+        const log = document.getElementById('log');
+        const div = document.createElement('div');
+        div.className = 'msg me';
+        div.innerHTML = '<div style="font-size:12px;opacity:.7;margin-bottom:4px">📎 photo</div>'
+                      + '<img src="{data_url(note_png)}" '
+                      +   'style="max-height:160px;width:auto;border-radius:6px;display:block">';
+        log.appendChild(div);
+        log.scrollTop = log.scrollHeight;
+    """)
+    await asyncio.sleep(0.5)
+    await type_user("set me a reminder from this please", ms_per_char=28)
     await submit()
     await bot_thinking()
     await bot_replace_thinking(
-        "Safari · Visual Studio Code · Music · Terminal · Slack · Telegram",
-        pause=2.0,
+        '<div style="opacity:.7;font-size:13px">📸 reading note via Vision OCR…</div>'
+        '<pre style="margin:6px 0;font-size:12px">"remind me to pick up\n'
+        ' dry cleaning by Friday\n'
+        ' 5pm — receipt #4827"</pre>'
+        '✓ Reminder set for <b>Fri 5:00 PM</b>  '
+        '<span style="opacity:.5">(e3f1)</span><br>'
+        'pick up dry cleaning · receipt #4827',
+        pause=3.0,
     )
 
-    # ---- Turn 3: cost -----------------------------------------------------
-    await type_user("/cost")
+    # ---- Turn 2: build + run ASCII butler --------------------------------
+    await type_user("build me an ASCII-art butler I can run from my Desktop", ms_per_char=24)
     await submit()
-    await bot_says(
-        '<pre>📊 Usage for this chat (web):'
-        '\nSince:    2026-05-05 12:18'
-        '\nRequests: 14'
-        '\nTokens:   in 25,341  ·  out 8,221'
-        '\nCost:     ~$0.20  (estimate)</pre>',
-        pause=2.5,
+    await bot_thinking()
+    butler_code = (
+        '<div style="opacity:.7;font-size:13px">📂 writing <code>~/Desktop/butler.py</code></div>'
+        '<pre style="margin:6px 0;font-size:11px;line-height:1.35">'
+        'butler = r"""\n'
+        "    ┌─────┐\n"
+        "    │ ░░░ │   At your service.\n"
+        "    └─┬─┬─┘\n"
+        "      │ │\n"
+        "    ╔═╧═╧═╗\n"
+        "    ║ ▒▒▒ ║\n"
+        "    ╚═════╝\n"
+        '"""\n'
+        'print(butler)</pre>'
+        '<div style="opacity:.7;font-size:13px">▶ <code>python3 ~/Desktop/butler.py</code></div>'
+        '<pre style="margin:6px 0;font-size:11px;line-height:1.35;color:#7ee787">'
+        "    ┌─────┐\n"
+        "    │ ░░░ │   At your service.\n"
+        "    └─┬─┬─┘\n"
+        "      │ │\n"
+        "    ╔═╧═╧═╗\n"
+        "    ║ ▒▒▒ ║\n"
+        "    ╚═════╝</pre>"
+        '<div style="opacity:.7;font-size:13px">✓ saved 184 chars · file ready on your Desktop</div>'
     )
+    await bot_replace_thinking(butler_code, pause=3.5)
+
+    # ---- Turn 3: research a quick answer ----------------------------------
+    await type_user("in 40 words: why is Claude Code different from a regular chatbot?", ms_per_char=22)
+    await submit()
+    await bot_thinking()
+    # Stream the research answer one chunk at a time for that "live" feel
+    chunks = [
+        "🔬 ", "running ",
+        "15 ", "agents ", "in ", "parallel… ",
+    ]
+    await page.evaluate("document.getElementById('thinking').innerHTML = ''")
+    for chunk in chunks:
+        await page.evaluate(f"""
+            const t = document.getElementById('thinking');
+            t.innerHTML += {chunk!r};
+            document.getElementById('log').scrollTop = 999999;
+        """)
+        await asyncio.sleep(0.35)
+    final = (
+        "It runs as a real shell agent — file edits, Bash, MCP servers, web "
+        "fetch — not just text completion. So it can read your code, run "
+        "commands, and produce side-effects (files, processes), where chatbots "
+        "only return strings."
+    )
+    await page.evaluate(f"""
+        const t = document.getElementById('thinking');
+        t.innerHTML = '';
+        t.id = '';
+    """)
+    # Type out the answer character-by-character so it feels alive
+    cursor_id = "demo-stream"
+    await page.evaluate(f"""
+        const log = document.getElementById('log');
+        const div = document.createElement('div');
+        div.className = 'msg bot';
+        div.id = {cursor_id!r};
+        div.textContent = '';
+        log.appendChild(div);
+    """)
+    for i in range(0, len(final), 3):
+        piece = final[i:i + 3]
+        await page.evaluate(
+            f"document.getElementById({cursor_id!r}).textContent += {piece!r};"
+            "document.getElementById('log').scrollTop = 999999;"
+        )
+        await asyncio.sleep(0.05)
+    await asyncio.sleep(1.6)
 
 
 async def record_demo() -> Path:

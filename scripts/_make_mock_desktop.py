@@ -127,6 +127,48 @@ def _window(d: ImageDraw.ImageDraw, box, title: str) -> None:
     d.text((x1 + 80, y1 + 9), title, fill=(180, 190, 210), font=f)
 
 
+def make_note() -> Path:
+    """A mock 'handwritten sticky note' for the photo demo."""
+    out = OUT.parent / "mock-note.png"
+    w, h = 600, 600
+    img = Image.new("RGB", (w, h), (252, 232, 142))  # post-it yellow
+    d = ImageDraw.Draw(img)
+    # Subtle paper texture: a faint shadow band
+    shadow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    sd.rectangle([(0, 0), (w, 36)], fill=(0, 0, 0, 25))
+    img = Image.alpha_composite(img.convert("RGBA"), shadow).convert("RGB")
+    d = ImageDraw.Draw(img)
+    # Try a handwriting-ish font; fall back to a normal one
+    note_font = None
+    for path in (
+        "/System/Library/Fonts/Supplemental/Bradley Hand Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Marker Felt.ttc",
+        "/System/Library/Fonts/Supplemental/Comic Sans MS.ttf",
+    ):
+        try:
+            note_font = ImageFont.truetype(path, 44)
+            break
+        except Exception:
+            continue
+    if note_font is None:
+        note_font = ImageFont.load_default()
+    lines = [
+        "remind me to pick up",
+        "dry cleaning by Friday",
+        "5pm — receipt #4827",
+    ]
+    y = 110
+    for line in lines:
+        d.text((50, y), line, fill=(40, 35, 30), font=note_font)
+        y += 70
+    out.parent.mkdir(parents=True, exist_ok=True)
+    img.save(out, optimize=True)
+    return out
+
+
 if __name__ == "__main__":
     p = make()
     print(f"wrote {p}  ({p.stat().st_size:,} bytes)")
+    n = make_note()
+    print(f"wrote {n}  ({n.stat().st_size:,} bytes)")
