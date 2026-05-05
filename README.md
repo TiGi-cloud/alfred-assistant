@@ -40,6 +40,29 @@ Mac-native by design: Vision OCR for photos you send him, AppleScript for app co
 
 > ⚠️ **Self-hosted only.** Alfred runs shell commands on the host with no sandbox. **Do not host this for other people.** Each person should run their own Alfred on their own Mac.
 
+## Screenshots
+
+<table>
+<tr>
+<td width="50%" align="center">
+<a href="docs/assets/screenshots/setup-wizard.png">
+  <img src="docs/assets/screenshots/setup-wizard.png" alt="Setup wizard"><br>
+  <strong>Setup wizard</strong>
+</a><br>
+<sub>Browser-based first-run config — no editing <code>.env</code></sub>
+</td>
+<td width="50%" align="center">
+<a href="docs/assets/screenshots/web-chat.png">
+  <img src="docs/assets/screenshots/web-chat.png" alt="Web chat"><br>
+  <strong>Web chat (localhost)</strong>
+</a><br>
+<sub>Built-in chat at <code>localhost:8765</code> — same brain as Telegram et al.</sub>
+</td>
+</tr>
+</table>
+
+> ![NOTE](https://img.shields.io/badge/note-screenshots_of_Telegram_/_Discord_/_Slack_/_iMessage_coming_soon-lightgrey)
+
 ## Quick start
 
 ```bash
