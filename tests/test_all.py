@@ -1373,6 +1373,116 @@ async def test_claude_runner() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 9h) Dashboard — /dashboard HTML + /api/* endpoints
+# ---------------------------------------------------------------------------
+async def test_dashboard() -> None:
+    section("Dashboard — /dashboard HTML + /api/* endpoints")
+
+    import aiohttp
+    from adapters.web import WebAdapter
+    from kernel.machines import MachineRegistry
+    from kernel.metrics import MetricsCollector
+    from kernel.scheduler import Scheduler
+
+    state_dir = Path(tempfile.gettempdir())
+    metrics_path = state_dir / "alfred-test-dash-metrics.json"
+    sched_path = state_dir / "alfred-test-dash-sched.json"
+    mach_path = state_dir / "alfred-test-dash-machines.json"
+    for f in (metrics_path, sched_path, mach_path):
+        if f.exists():
+            f.unlink()
+
+    metrics = MetricsCollector(interval_secs=600, max_samples=10, state_path=metrics_path)
+    metrics._samples = [
+        {"ts": 1700000000 + i * 60, "cpu": 20 + i, "mem": 70, "disk": 8}
+        for i in range(5)
+    ]
+    sched = Scheduler(state_path=sched_path, poll_interval=600)
+    mach = MachineRegistry(state_path=mach_path)
+    mach.add("prod", host="alice@prod.example.com", mac="AA:BB:CC:DD:EE:FF")
+
+    adapter = WebAdapter(
+        host="127.0.0.1", port=8920, auth_token="dash-probe",
+        metrics_collector=metrics, scheduler=sched, machines_registry=mach,
+    )
+    await adapter.start()
+    try:
+        async with aiohttp.ClientSession() as s:
+            hdrs = {"Authorization": "Bearer dash-probe"}
+
+            async with s.get("http://127.0.0.1:8920/dashboard?token=dash-probe") as r:
+                html = await r.text()
+                expect(r.status == 200, "/dashboard returns 200 with valid token")
+                expect("Alfred Dashboard" in html, "/dashboard has expected title")
+                expect("__ALFRED_SECRET__" in html and "dash-probe" in html,
+                       "/dashboard injects auth secret into the page")
+
+            async with s.get("http://127.0.0.1:8920/dashboard") as r:
+                expect(r.status == 401, "/dashboard rejects request without token")
+
+            async with s.get("http://127.0.0.1:8920/api/status", headers=hdrs) as r:
+                d = await r.json()
+                expect(r.status == 200, "/api/status returns 200")
+                expect(set(d.keys()) >= {"status", "uptime", "sessions", "alerts",
+                                          "schedules", "reminders", "plugins"},
+                       "/api/status response shape complete")
+
+            async with s.get("http://127.0.0.1:8920/api/health-score", headers=hdrs) as r:
+                d = await r.json()
+                expect(r.status == 200, "/api/health-score returns 200")
+                expect(set(d.keys()) >= {"score", "level", "cpu", "mem", "disk"},
+                       "/api/health-score has fields the dashboard reads")
+                expect(0 <= d["score"] <= 100, "score is 0-100")
+
+            async with s.get("http://127.0.0.1:8920/api/metrics?limit=3", headers=hdrs) as r:
+                d = await r.json()
+                expect(r.status == 200 and isinstance(d, list) and len(d) <= 3,
+                       "/api/metrics respects limit")
+
+            async with s.get("http://127.0.0.1:8920/api/cost", headers=hdrs) as r:
+                d = await r.json()
+                expect(r.status == 200 and "records" in d and "totals" in d,
+                       "/api/cost shape OK without claude_runner")
+
+            async with s.get("http://127.0.0.1:8920/api/machines", headers=hdrs) as r:
+                d = await r.json()
+                expect(r.status == 200 and "prod" in d.get("machines", {}),
+                       "/api/machines returns registered targets")
+
+            async with s.post("http://127.0.0.1:8920/api/wake",
+                              json={"name": "prod"}, headers=hdrs) as r:
+                d = await r.json()
+                expect(r.status == 200 and d.get("ok") and d.get("mac"),
+                       "/api/wake fires WoL for known machine")
+
+            async with s.post("http://127.0.0.1:8920/api/wake",
+                              json={"name": "nope"}, headers=hdrs) as r:
+                d = await r.json()
+                expect(r.status == 400 and not d.get("ok"),
+                       "/api/wake rejects unknown machine")
+
+            async with s.get("http://127.0.0.1:8920/api/alerts", headers=hdrs) as r:
+                d = await r.json()
+                expect(r.status == 200 and d == [], "/api/alerts empty when no jobs")
+
+            async with s.get("http://127.0.0.1:8920/api/status",
+                             headers={"Authorization": "Bearer wrong"}) as r:
+                expect(r.status == 401, "/api/* rejects wrong bearer token")
+
+            async with s.get("http://127.0.0.1:8920/api/docker-status", headers=hdrs) as r:
+                d = await r.json()
+                expect(r.status == 200 and d == [], "stub endpoint returns []")
+
+            async with s.post("http://127.0.0.1:8920/api/execute-start", headers=hdrs) as r:
+                expect(r.status == 501, "disabled endpoint returns 501")
+    finally:
+        await adapter.stop()
+        for f in (metrics_path, sched_path, mach_path):
+            if f.exists():
+                f.unlink()
+
+
+# ---------------------------------------------------------------------------
 # 10) app.py entry-point smoke
 # ---------------------------------------------------------------------------
 def test_app_smoke() -> None:
@@ -1404,7 +1514,6 @@ async def amain() -> int:
     test_dataclasses()
     await test_web_adapter()
     await test_dispatcher()
-    await test_setup_wizard()
     test_imessage_unit()
     test_applescript_syntax()
     test_adapter_serialisation()
@@ -1414,7 +1523,12 @@ async def amain() -> int:
     await test_scheduler()
     await test_claude_runner()
     await test_session_memory()
+    await test_dashboard()
     test_app_smoke()
+    # Wizard last because its /save handler schedules a deferred SystemExit
+    # via loop.call_later(1.5, _shutdown) — running it earlier would kill
+    # whichever test happens to be running 1.5s later.
+    await test_setup_wizard()
 
     print(f"\n  Summary: {GREEN}{_pass} passed{RESET}, "
           f"{RED}{_fail} failed{RESET}, "
