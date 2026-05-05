@@ -113,6 +113,107 @@ Cost:     ~$0.20  (estimate)</pre>`);
         await web.stop()
 
 
+async def screenshot_dashboard(pw_browser):
+    """Telegram Mini App dashboard at localhost with the cyber-butler avatar."""
+    from adapters.web import WebAdapter
+    from kernel.metrics import MetricsCollector
+    from kernel.scheduler import Scheduler
+
+    metrics = MetricsCollector(
+        interval_secs=600, max_samples=120,
+        state_path=Path("/tmp/alfred-screenshot-metrics.json"),
+    )
+    # Pre-populate with realistic samples so the chart looks alive
+    import time
+    metrics._samples = []
+    base = time.time() - 60 * 60
+    for i in range(60):
+        metrics._samples.append({
+            "ts": base + i * 60,
+            "cpu": 18 + (i % 12) * 1.2,
+            "mem": 88 + (i % 5) * 0.6,
+            "disk": 9.0,
+            "mem_free_mb": 2048,
+            "mem_total_mb": 16384,
+        })
+
+    sched = Scheduler(state_path=Path("/tmp/alfred-screenshot-sched.json"),
+                      poll_interval=600)
+    web = WebAdapter(host="127.0.0.1", port=8911, auth_token="demo",
+                     metrics_collector=metrics, scheduler=sched)
+    await sched.start()
+    await web.start()
+    # Don't auto-poll metrics during the screenshot run — we already
+    # populated samples manually.
+    try:
+        # Mobile-ish viewport so it looks like a Telegram Mini App
+        page = await pw_browser.new_page(viewport={"width": 393, "height": 800})
+        # Block Telegram's webapp.js (which throws on unsupported methods
+        # when run outside the real client) and replace it with a silent
+        # no-op proxy. Also redact the local LAN IP from /api/status so the
+        # screenshot doesn't reveal the dev machine's private address.
+        async def _stub(route, request):
+            if "telegram-web-app.js" in request.url:
+                stub = """
+                    window.Telegram = window.Telegram || {};
+                    const noop = () => {};
+                    const sub = () => new Proxy({}, { get: () => noop });
+                    window.Telegram.WebApp = new Proxy({
+                        platform: 'web',
+                        colorScheme: 'dark',
+                        themeParams: {},
+                        initData: '',
+                        initDataUnsafe: {},
+                        version: '6.0',
+                        isExpanded: true,
+                        BackButton: sub(), MainButton: sub(), SettingsButton: sub(),
+                        CloudStorage: sub(), BiometricManager: sub(), HapticFeedback: sub(),
+                    }, { get(t, k) { return (k in t) ? t[k] : noop; }, set() { return true; } });
+                """
+                await route.fulfill(status=200, content_type="application/javascript", body=stub)
+                return
+            if "/api/status" in request.url:
+                resp = await route.fetch()
+                body = await resp.json()
+                # Redact local IP and hostname for the public screenshot
+                body.setdefault("status", {})
+                if "IP" in body["status"]:
+                    body["status"]["IP"] = "192.168.1.42"
+                if "HOST" in body["status"]:
+                    body["status"]["HOST"] = "alfred-mac"
+                import json as _json
+                await route.fulfill(status=200, content_type="application/json",
+                                    body=_json.dumps(body))
+                return
+            await route.continue_()
+        await page.route("**/*", _stub)
+        page.on("pageerror", lambda e: print(f"    JS error: {e}"))
+        page.on("console", lambda m: m.type == "error" and print(f"    console.error: {m.text}"))
+
+        await page.goto("http://127.0.0.1:8911/dashboard?token=demo",
+                        wait_until="networkidle", timeout=15000)
+        # Wait until the Status panel has populated (look for the System Info card title)
+        try:
+            await page.wait_for_function(
+                "document.querySelector('#status') && "
+                "document.querySelector('#status').innerText.includes('CPU')",
+                timeout=10000,
+            )
+        except Exception:
+            pass
+        await asyncio.sleep(0.6)  # gauge animations
+        out = OUT / "dashboard.png"
+        await page.screenshot(path=str(out), full_page=False)
+        print(f"  wrote {out}")
+        out2 = OUT / "dashboard-full.png"
+        await page.screenshot(path=str(out2), full_page=True)
+        print(f"  wrote {out2}")
+        await page.close()
+    finally:
+        await sched.stop()
+        await web.stop()
+
+
 async def main():
     from playwright.async_api import async_playwright
     pw = await async_playwright().start()
@@ -122,6 +223,7 @@ async def main():
             print("Generating screenshots…")
             await screenshot_setup_wizard(browser)
             await screenshot_web_chat(browser)
+            await screenshot_dashboard(browser)
         finally:
             await browser.close()
     finally:

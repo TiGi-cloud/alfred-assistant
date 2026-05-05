@@ -28,6 +28,7 @@ import base64
 import json
 import logging
 import mimetypes
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -382,6 +383,16 @@ def _keyboard_to_json(kb: Optional[Keyboard]) -> Optional[list[list[dict]]]:
     ]
 
 
+def _fmt_uptime(secs: int) -> str:
+    if secs < 60:
+        return f"{secs}s"
+    if secs < 3600:
+        return f"{secs // 60}m"
+    if secs < 86400:
+        return f"{secs // 3600}h {(secs % 3600) // 60}m"
+    return f"{secs // 86400}d {(secs % 86400) // 3600}h"
+
+
 def _data_url(path: Path) -> str:
     """Inline-encode a small file as a data: URL. Used for photos so we don't
     need a public file-serving endpoint. For larger files we fall back to a
@@ -396,7 +407,23 @@ def _data_url(path: Path) -> str:
 # WebAdapter
 # ---------------------------------------------------------------------------
 class WebAdapter(ChatAdapter):
-    """Browser-based chat adapter served on http://<host>:<port>."""
+    """Browser-based chat adapter served on http://<host>:<port>.
+
+    Surfaces three things:
+      /                — chat UI (the inline `_CHAT_HTML`)
+      /dashboard       — Mac-status dashboard (Mini App, served from webapp/index.html)
+      /app             — alias for /dashboard for Telegram Mini App URLs
+      /api/*           — JSON endpoints powering the dashboard
+
+    Optional services can be wired in via the constructor; if absent the
+    dashboard's affected sections degrade to "no data" rather than crash:
+
+      claude_runner       → /api/cost, /api/live_usage
+      scheduler           → /api/alerts, /api/schedules*
+      machines_registry   → /api/machines, /api/wake
+      metrics_collector   → /api/metrics
+      dispatcher          → /api/commands, /api/quick-action
+    """
 
     name = "web"
 
@@ -407,6 +434,12 @@ class WebAdapter(ChatAdapter):
         port: int = 8765,
         auth_token: Optional[str] = None,
         photo_inline_limit_bytes: int = 4 * 1024 * 1024,
+        # Optional service references for the dashboard
+        claude_runner=None,
+        scheduler=None,
+        machines_registry=None,
+        metrics_collector=None,
+        dispatcher=None,
     ) -> None:
         self._host = host
         self._port = port
@@ -419,6 +452,13 @@ class WebAdapter(ChatAdapter):
         self._runner: Optional[web.AppRunner] = None
         self._site: Optional[web.TCPSite] = None
         self._started = False
+        self._start_time = time.time()
+        # Dashboard services
+        self._claude_runner = claude_runner
+        self._scheduler = scheduler
+        self._machines = machines_registry
+        self._metrics = metrics_collector
+        self._dispatcher = dispatcher
 
     @property
     def url(self) -> str:
@@ -431,9 +471,42 @@ class WebAdapter(ChatAdapter):
             return
         app = web.Application()
         app.add_routes([
+            # Chat UI
             web.get("/", self._serve_index),
             web.get("/ws", self._serve_ws),
             web.get("/file/{token}", self._serve_file),
+            # Dashboard (Mini App)
+            web.get("/dashboard", self._serve_dashboard),
+            web.get("/app", self._serve_dashboard),  # alias for Telegram WEBAPP_URL
+            # Dashboard API
+            web.get("/api/status",        self._api_status),
+            web.get("/api/health-score",  self._api_health_score),
+            web.get("/api/metrics",       self._api_metrics),
+            web.get("/api/cost",          self._api_cost),
+            web.get("/api/live_usage",    self._api_cost),         # alias
+            web.get("/api/usage_limits",  self._api_usage_limits),
+            web.get("/api/alerts",        self._api_alerts),
+            web.delete("/api/alerts/{id}", self._api_alerts_delete),
+            web.get("/api/schedules",     self._api_schedules),
+            web.post("/api/schedules",    self._api_schedules_create),
+            web.delete("/api/schedules/{id}", self._api_schedules_delete),
+            web.get("/api/machines",      self._api_machines),
+            web.post("/api/wake",         self._api_wake),
+            web.get("/api/commands",      self._api_commands),
+            web.post("/api/quick-action", self._api_quick_action),
+            web.get("/api/screenshot",    self._api_screenshot),
+            web.get("/api/history",       self._api_history),
+            # Stubs for endpoints that need legacy infrastructure
+            web.get("/api/docker-status",   self._api_stub_empty),
+            web.get("/api/health-monitor",  self._api_stub_empty),
+            web.get("/api/container-logs",  self._api_stub_empty),
+            web.get("/api/machine-stats",   self._api_stub_empty),
+            web.get("/api/media",           self._api_stub_empty),
+            web.post("/api/media/control",  self._api_stub_disabled),
+            web.post("/api/execute-start",  self._api_stub_disabled),
+            web.post("/api/execute-cancel", self._api_stub_disabled),
+            web.get("/api/files",           self._api_files),
+            web.post("/api/files/batch",    self._api_stub_disabled),
         ])
         self._runner = web.AppRunner(app)
         await self._runner.setup()
@@ -441,6 +514,9 @@ class WebAdapter(ChatAdapter):
         await self._site.start()
         self._started = True
         logger.info("Web adapter listening at %s", self.url)
+        logger.info("Dashboard: http://%s:%d/dashboard%s",
+                    self._host, self._port,
+                    f"?token={self._auth_token}" if self._auth_token else "")
 
     async def stop(self) -> None:
         if not self._started:
@@ -680,3 +756,374 @@ class WebAdapter(ChatAdapter):
         # The web adapter doesn't support inbound attachments yet — files
         # uploaded from the browser will be a v2 feature.
         raise NotImplementedError("Web adapter does not yet accept inbound attachments")
+
+    # ===========================================================================
+    # Dashboard (Mini App) — HTML + REST endpoints powering webapp/index.html
+    # ===========================================================================
+    def _check_dashboard_auth(self, request: web.Request) -> bool:
+        if not self._auth_token:
+            return True
+        # Dashboard scripts use 'Authorization: Bearer <secret>'.
+        # Telegram Mini App browsers can't always set headers easily, so we
+        # also accept ?token= for the initial HTML load.
+        header = request.headers.get("Authorization", "")
+        if header == f"Bearer {self._auth_token}":
+            return True
+        return request.query.get("token") == self._auth_token
+
+    async def _serve_dashboard(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.Response(status=401, text="unauthorized")
+        html_path = Path(__file__).resolve().parent.parent / "webapp" / "index.html"
+        if not html_path.exists():
+            return web.Response(status=404, text="dashboard HTML not found")
+        html = html_path.read_text()
+        # Inject the auth secret so the dashboard's fetch() calls can carry
+        # the bearer header. Replaced inline inside a <script> tag.
+        secret = self._auth_token or ""
+        injection = (
+            f"<script>window.__ALFRED_SECRET__={json.dumps(secret)};"
+            "window.__ALFRED_API__='';</script>"
+        )
+        html = html.replace("</head>", injection + "</head>", 1)
+        return web.Response(text=html, content_type="text/html")
+
+    # -- /api/status --------------------------------------------------------
+    async def _api_status(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        from actions import system as sysmod  # lazy: avoid circular at import
+        # Re-use the same shell snippet the slash command uses
+        rc, out, _ = await sysmod._run(
+            "bash", "-c",
+            'echo "HOST:$(hostname)"; '
+            'echo "UPTIME:$(uptime | sed \'s/.*up //;s/,.*load.*//\' | xargs)"; '
+            'echo "DISK_PCT:$(df / | tail -1 | awk \'{print $5}\' | tr -d "%")"; '
+            'echo "DISK_FREE:$(df -h / | tail -1 | awk \'{print $4}\') free"; '
+            'echo "MEM_FREE_MB:$(vm_stat | awk \'/Pages free/{f=$3} /Pages inactive/{i=$3} END{printf "%d", (f+i)*4096/1048576}\')"; '
+            'echo "MEM_TOTAL_MB:$(sysctl -n hw.memsize | awk \'{printf "%d", $1/1048576}\')"; '
+            'echo "CPU_PCT:$(top -l 2 -n 0 | grep "CPU usage" | tail -1 | awk \'{print $3}\' | tr -d "%")"; '
+            'echo "IP:$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo N/A)"',
+            timeout=15,
+        )
+        info: dict[str, str] = {}
+        if rc == 0:
+            for line in out.splitlines():
+                if ":" in line:
+                    k, _, v = line.partition(":")
+                    info[k.strip()] = v.strip()
+
+        sessions = 0
+        alerts = schedules = reminders = 0
+        if self._claude_runner is not None:
+            sessions = len(getattr(self._claude_runner, "_sessions", {}))
+        if self._scheduler is not None:
+            for jobs in getattr(self._scheduler, "_jobs", {}).values():
+                for j in jobs:
+                    k = j.get("kind")
+                    if k == "alert":
+                        alerts += 1
+                    elif k == "schedule":
+                        schedules += 1
+                    elif k == "reminder":
+                        reminders += 1
+
+        # `plugins` was a legacy concept (user-installed plugin scripts).
+        # In v2 every command lives in actions/ — kept empty here so the
+        # dashboard "Plugins" card shows "none" rather than 39 command names.
+        plugins: list[str] = []
+
+        bot_uptime_secs = int(time.time() - self._start_time)
+        return web.json_response({
+            "status": info,
+            "uptime": _fmt_uptime(bot_uptime_secs),
+            "sessions": sessions,
+            "alerts": alerts,
+            "schedules": schedules,
+            "reminders": reminders,
+            "plugins": plugins,
+        })
+
+    # -- /api/health-score --------------------------------------------------
+    async def _api_health_score(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        sample = (self._metrics.latest() if self._metrics else None) or {}
+        cpu = float(sample.get("cpu", 0))
+        mem = float(sample.get("mem", 0))
+        disk = float(sample.get("disk", 0))
+        # Simple inverse-pressure score: 100 = idle, 0 = pegged
+        score = int(round(100 - max(cpu, mem * 0.7, disk * 0.5)))
+        score = max(0, min(100, score))
+        if score >= 80:
+            level = "healthy"
+        elif score >= 60:
+            level = "ok"
+        elif score >= 40:
+            level = "warning"
+        else:
+            level = "critical"
+        # Shape matches what the dashboard reads: health.cpu/mem/disk/score/level
+        return web.json_response({
+            "score": score,
+            "level": level,
+            "cpu": cpu,
+            "mem": mem,
+            "disk": disk,
+        })
+
+    # -- /api/metrics -------------------------------------------------------
+    async def _api_metrics(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        try:
+            limit = int(request.query.get("limit", "60"))
+        except ValueError:
+            limit = 60
+        if self._metrics is None:
+            return web.json_response([])
+        return web.json_response(self._metrics.recent(limit=limit))
+
+    # -- /api/cost (also /api/live_usage) ----------------------------------
+    async def _api_cost(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if self._claude_runner is None:
+            return web.json_response({"records": [], "totals": {}})
+        usage = getattr(self._claude_runner, "_usage", {}) or {}
+        flat: list[dict] = []
+        for chat_key, records in usage.items():
+            for r in records:
+                flat.append({**r, "chat": chat_key})
+        flat.sort(key=lambda r: r.get("ts", 0), reverse=True)
+        total_in = sum(r.get("in", 0) for r in flat)
+        total_out = sum(r.get("out", 0) for r in flat)
+        return web.json_response({
+            "records": flat[:200],
+            "totals": {
+                "input_tokens": total_in,
+                "output_tokens": total_out,
+                "requests": len(flat),
+            },
+        })
+
+    async def _api_usage_limits(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        # Anthropic doesn't expose live quota via API; return a stub.
+        return web.json_response({"available": True, "details": None})
+
+    # -- /api/alerts + /api/schedules --------------------------------------
+    async def _api_alerts(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if self._scheduler is None:
+            return web.json_response([])
+        out = []
+        for chat_key, jobs in getattr(self._scheduler, "_jobs", {}).items():
+            for j in jobs:
+                if j.get("kind") == "alert":
+                    out.append({**j, "chat": chat_key})
+        return web.json_response(out)
+
+    async def _api_alerts_delete(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if self._scheduler is None:
+            return web.json_response({"ok": False, "error": "no scheduler"})
+        job_id = request.match_info.get("id", "")
+        for _chat_key, jobs in getattr(self._scheduler, "_jobs", {}).items():
+            for j in list(jobs):
+                if j.get("id") == job_id and j.get("kind") == "alert":
+                    jobs.remove(j)
+                    self._scheduler._save()
+                    return web.json_response({"ok": True})
+        return web.json_response({"ok": False, "error": "not found"}, status=404)
+
+    async def _api_schedules(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if self._scheduler is None:
+            return web.json_response([])
+        out = []
+        for chat_key, jobs in getattr(self._scheduler, "_jobs", {}).items():
+            for j in jobs:
+                if j.get("kind") in ("schedule", "reminder"):
+                    out.append({**j, "chat": chat_key})
+        return web.json_response(out)
+
+    async def _api_schedules_create(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        # Without a Context to attach to, we can't create chat-scoped schedules
+        # cleanly from the dashboard yet. Return 501 until v2.
+        return web.json_response(
+            {"ok": False, "error": "create-from-dashboard not yet supported"},
+            status=501,
+        )
+
+    async def _api_schedules_delete(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if self._scheduler is None:
+            return web.json_response({"ok": False})
+        jid = request.match_info.get("id", "")
+        for _chat_key, jobs in getattr(self._scheduler, "_jobs", {}).items():
+            for j in list(jobs):
+                if j.get("id") == jid:
+                    jobs.remove(j)
+                    self._scheduler._save()
+                    return web.json_response({"ok": True})
+        return web.json_response({"ok": False, "error": "not found"}, status=404)
+
+    # -- /api/machines + /api/wake -----------------------------------------
+    async def _api_machines(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if self._machines is None:
+            return web.json_response({"machines": {}, "active": "local"})
+        return web.json_response({
+            "machines": self._machines.list_machines(),
+            "active": "local",  # per-user pointer not meaningful from dashboard yet
+        })
+
+    async def _api_wake(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if self._machines is None:
+            return web.json_response({"ok": False, "error": "no registry"})
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        name = (data.get("name") or "").strip()
+        if not name:
+            return web.json_response({"ok": False, "error": "name required"}, status=400)
+        try:
+            mac = self._machines.wake(name)
+        except (KeyError, ValueError) as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
+        return web.json_response({"ok": True, "name": name, "mac": mac})
+
+    # -- /api/commands + /api/quick-action ---------------------------------
+    async def _api_commands(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if self._dispatcher is None:
+            return web.json_response([])
+        names = sorted(getattr(self._dispatcher, "_commands", {}).keys())
+        return web.json_response([{"name": n} for n in names])
+
+    async def _api_quick_action(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if self._dispatcher is None:
+            return web.json_response({"ok": False, "error": "no dispatcher"})
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        cmd = (data.get("command") or "").strip().lstrip("/")
+        if not cmd:
+            return web.json_response({"ok": False, "error": "command required"}, status=400)
+        # Synthesise a Message + Context as if it came from the dashboard chat.
+        synth_msg = Message(
+            id=str(int(time.time() * 1000)),
+            chat=Chat(id="dashboard", type="direct", title="Dashboard"),
+            user=User(id="dashboard", display_name="Dashboard"),
+            kind=MessageKind.COMMAND,
+            text=f"/{cmd}",
+        )
+        # Run via dispatcher so the action handler executes; output goes to
+        # ctx.adapter.send_text which is this WebAdapter — i.e. broadcast to
+        # any connected WebSocket. Return immediate ack; full output streams
+        # via the chat UI if the user has it open.
+        try:
+            await self._dispatcher._dispatch_message(self, synth_msg)
+            return web.json_response({"ok": True})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    # -- /api/screenshot ----------------------------------------------------
+    async def _api_screenshot(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if sys.platform != "darwin":
+            return web.json_response({"ok": False, "error": "macOS only"}, status=400)
+        import os
+        import tempfile
+        fd, path = tempfile.mkstemp(prefix="alfred-dash-shot-", suffix=".png")
+        os.close(fd)
+        proc = await asyncio.create_subprocess_exec(
+            "screencapture", "-x", path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, err = await proc.communicate()
+        if proc.returncode != 0:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            return web.json_response(
+                {"ok": False, "error": err.decode().strip() or "screencapture failed"},
+                status=500,
+            )
+        # Inline the image as a data URL so the browser doesn't need a second auth round
+        try:
+            data = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+            return web.json_response({"ok": True, "data_url": f"data:image/png;base64,{data}"})
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+    # -- /api/history -------------------------------------------------------
+    async def _api_history(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        # Command history isn't currently tracked in the kernel — return empty.
+        return web.json_response([])
+
+    # -- /api/files ---------------------------------------------------------
+    async def _api_files(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        import os as _os
+        path = request.query.get("path", str(Path.home() / "Desktop"))
+        if not _os.path.isdir(path):
+            return web.json_response({"error": "not a directory"}, status=400)
+        show_hidden = request.query.get("hidden", "false").lower() == "true"
+        entries = []
+        try:
+            for entry in sorted(_os.listdir(path))[:100]:
+                if not show_hidden and entry.startswith("."):
+                    continue
+                full = _os.path.join(path, entry)
+                try:
+                    size = _os.path.getsize(full) if _os.path.isfile(full) else 0
+                except OSError:
+                    size = 0
+                entries.append({
+                    "name": entry,
+                    "is_dir": _os.path.isdir(full),
+                    "size": size,
+                })
+        except PermissionError:
+            return web.json_response({"error": "permission denied"}, status=403)
+        return web.json_response({"path": path, "entries": entries})
+
+    # -- Stubs for endpoints that need legacy infrastructure ---------------
+    async def _api_stub_empty(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        return web.json_response([])
+
+    async def _api_stub_disabled(self, request: web.Request) -> web.Response:
+        if not self._check_dashboard_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        return web.json_response(
+            {"ok": False, "error": "this feature has not been ported to v2 yet"},
+            status=501,
+        )

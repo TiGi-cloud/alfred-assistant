@@ -44,6 +44,7 @@ from kernel import ChatAdapter
 from kernel.claude import ClaudeRunner
 from kernel.runner import Context, Dispatcher
 from kernel.machines import MachineRegistry
+from kernel.metrics import MetricsCollector
 from kernel.projects import ProjectRegistry
 from kernel.scheduler import Scheduler
 import actions as alfred_actions
@@ -229,28 +230,45 @@ async def run() -> None:
     scheduler = Scheduler()
     machines_registry = MachineRegistry()
     notif_watcher = NotificationWatcher()
+    metrics = MetricsCollector()
+    claude = _get_claude()
+
     for a in adapters:
         scheduler.register_adapter(a)
         notif_watcher.register_adapter(a)
+        # Wire dashboard service references into the WebAdapter so /api/*
+        # endpoints can read kernel state.
+        if isinstance(a, WebAdapter):
+            a._claude_runner = claude
+            a._scheduler = scheduler
+            a._machines = machines_registry
+            a._metrics = metrics
+            a._dispatcher = dispatcher
+
     alfred_actions.register_all(
         dispatcher,
-        claude_runner=_get_claude(),
+        claude_runner=claude,
         scheduler_instance=scheduler,
         machines_registry=machines_registry,
         project_registry=_get_projects(),
     )
 
-    # Start every adapter, then the scheduler + notification watcher
+    # Start every adapter, then the kernel services
     for a in adapters:
         await a.start()
     await scheduler.start()
+    await metrics.start()
     if sys.platform == "darwin":
         await notif_watcher.start()
 
-    # Print the web URL so users know where to click
+    # Print the web URLs so users know where to click
     for a in adapters:
         if isinstance(a, WebAdapter):
-            print(f"\n  🎩 Web chat:   {a.url}\n")
+            tok = a._auth_token
+            base = f"http://{a._host}:{a._port}"
+            print(f"\n  🎩 Web chat:   {base}/?token={tok}" if tok else f"\n  🎩 Web chat:   {base}/")
+            print(f"     Dashboard:  {base}/dashboard?token={tok}" if tok else f"     Dashboard:  {base}/dashboard")
+            print()
 
     # Run dispatcher against every adapter concurrently
     tasks = [asyncio.create_task(dispatcher.run(a), name=f"dispatch-{a.name}") for a in adapters]
@@ -271,6 +289,7 @@ async def run() -> None:
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
     await scheduler.stop()
+    await metrics.stop()
     await notif_watcher.stop()
     try:
         from kernel.browser import shutdown_pool

@@ -44,19 +44,26 @@ Mac-native by design: Vision OCR for photos you send him, AppleScript for app co
 
 <table>
 <tr>
-<td width="50%" align="center">
+<td width="33%" align="center" valign="top">
+<a href="docs/assets/screenshots/dashboard-full.png">
+  <img src="docs/assets/screenshots/dashboard-full.png" alt="Dashboard"><br>
+  <strong>Mini App dashboard</strong>
+</a><br>
+<sub>Live system gauges + sparklines. Embeds in Telegram as a Mini App, or open at <code>/dashboard</code> in any browser.</sub>
+</td>
+<td width="33%" align="center" valign="top">
 <a href="docs/assets/screenshots/setup-wizard.png">
   <img src="docs/assets/screenshots/setup-wizard.png" alt="Setup wizard"><br>
   <strong>Setup wizard</strong>
 </a><br>
-<sub>Browser-based first-run config — no editing <code>.env</code></sub>
+<sub>Browser-based first-run config. No editing <code>.env</code> by hand — paste tokens, click Save.</sub>
 </td>
-<td width="50%" align="center">
+<td width="33%" align="center" valign="top">
 <a href="docs/assets/screenshots/web-chat.png">
   <img src="docs/assets/screenshots/web-chat.png" alt="Web chat"><br>
   <strong>Web chat (localhost)</strong>
 </a><br>
-<sub>Built-in chat at <code>localhost:8765</code> — same brain as Telegram et al.</sub>
+<sub>Built-in chat at <code>localhost:8765</code> — same brain as Telegram, Discord, Slack, iMessage.</sub>
 </td>
 </tr>
 </table>
@@ -82,6 +89,7 @@ Pick a chat platform in the wizard, click Save, then `python3 app.py`. **Five-mi
 | **Discord** | [setup/discord.md](docs/setup/discord.md) | Free bot. `pip install 'discord.py>=2.4'`. |
 | **Slack** | [setup/slack.md](docs/setup/slack.md) | Free Slack app, Socket Mode. `pip install 'slack-bolt>=1.18'`. |
 | **iMessage** | [setup/imessage.md](docs/setup/imessage.md) | macOS only. Polls `chat.db` + AppleScript send. 1:1 chats. |
+| **Dashboard (Mini App)** | [setup/dashboard.md](docs/setup/dashboard.md) | Browser at `/dashboard`, or embed in Telegram via Cloudflare Tunnel. Live gauges + sparklines. |
 
 Run any combination at once.
 
