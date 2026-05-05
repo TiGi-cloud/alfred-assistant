@@ -44,6 +44,17 @@ The setup wizard refuses to save a Telegram config without an allowlist for exac
 - The auth token is in the URL. Anyone who shoulder-surfs your browser can copy it. Treat it like a password.
 - Don't put Alfred behind a reverse proxy that exposes it to the internet without adding real auth (TLS + OAuth proxy / Cloudflare Access / etc.).
 
+## Dashboard caveats
+
+The dashboard at `/dashboard` shares the same `WEB_AUTH_TOKEN` as the chat. It exposes a wider attack surface than the chat alone:
+
+- `/api/screenshot` triggers a real `screencapture`. Anyone with the token can pull a desktop snapshot at any time.
+- `/api/quick-action` runs **any registered slash command** (including `/screenshot`, `/clipboard`, `/tts`).
+- `/api/files` returns a directory listing for any path on the host.
+- `/api/wake` sends Wake-on-LAN packets to whatever MACs you have configured.
+
+If you tunnel `/dashboard` to the public internet (Cloudflare Tunnel + `WEBAPP_URL` so it works as a Telegram Mini App), use a long random `WEB_AUTH_TOKEN`. Treat any leak of that token like a leaked SSH key — rotate immediately by deleting `WEB_AUTH_TOKEN` from `.env` and restarting Alfred (the wizard re-generates one).
+
 ## What lives in `.env`
 
 The setup wizard writes `.env` with mode `0600` (readable only by your user). It contains:

@@ -61,7 +61,7 @@ Two bots can't share a token. If `bot.py` (legacy) and `app.py` are both running
 
 ### Mini App / "Dashboard" button missing
 
-The new web adapter doesn't use Telegram's Mini App. If you want one, set `WEBAPP_URL` in `.env` to a public HTTPS URL serving your own dashboard — Telegram requires HTTPS, so use a Cloudflare Tunnel / ngrok / etc.
+Set `WEBAPP_URL` in `.env` to an HTTPS URL pointing at `/dashboard` on your tunnelled localhost (Cloudflare Tunnel / Tailscale Funnel / ngrok). Full walkthrough in [setup/dashboard.md](setup/dashboard.md). Restart Alfred and the menu button will be set automatically on next start.
 
 ## Slack
 
@@ -119,6 +119,28 @@ Your `WEB_AUTH_TOKEN` doesn't match the URL token. Either:
 ### Photos don't render
 
 Photos ≤ 4 MB are inlined as `data:` URLs. Larger files are served from `/file/<token>` and require the auth token in the request. Check the browser console for 401s — usually means you opened the page without `?token=…`.
+
+## Dashboard
+
+### `/dashboard` returns 401
+
+Open with `?token=<WEB_AUTH_TOKEN>` in the URL. The token is in `.env` and is also printed at startup. The dashboard then injects it into every `/api/*` call as a Bearer header.
+
+### Cards stay as skeleton placeholders forever
+
+Usually a JavaScript error broke the load chain. Open browser dev-tools → Console. Common cause: when running outside Telegram, the official `webapp.js` shim sometimes throws on unsupported APIs. The dashboard handles this in v2; if you still hit it, file a bug with the console output.
+
+### CPU / memory / disk show `NaN%`
+
+The metrics collector hasn't returned a sample yet. The first sample lands ~1 second after startup; subsequent samples every 60s. Refresh after a few seconds. Or restart Alfred — `MetricsCollector.start()` samples once before the loop.
+
+### Sparkline graphs are flat at zero
+
+The collector hasn't accumulated enough history. Default poll is 60s; a full 60-minute graph needs an hour of uptime. The history persists to `alfred_metrics.json` so it accumulates across restarts.
+
+### Telegram Mini App "could not load"
+
+Telegram caches the menu button URL. Close the bot's chat → reopen, or send `/start`. If still broken, verify `WEBAPP_URL` in `.env` resolves over HTTPS in your phone's browser first.
 
 ## Permissions
 

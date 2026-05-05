@@ -18,11 +18,15 @@ The bot is named after **Alfred Pennyworth** (Batman's butler). Voice = competen
 actions/      — slash-command handlers (39 commands across 14 modules)
                 each works on every adapter; uses kernel.runner.Context
 adapters/     — one module per chat platform (5: telegram, web, discord, slack, imessage)
-                converts native messages ↔ kernel types
-kernel/       — platform-agnostic types + services (10 modules)
+                converts native messages ↔ kernel types.
+                adapters/web.py also serves the dashboard at /dashboard +
+                ~27 /api/* endpoints powering it.
+kernel/       — platform-agnostic types + services (12 modules)
                 messages, buttons, adapter, runner, claude, scheduler,
-                machines, projects, browser, store, branding
-app.py        — single entry point; wires everything
+                machines, projects, browser, store, metrics, branding
+app.py        — single entry point; wires everything (incl. MetricsCollector)
+webapp/       — index.html — the Mini App dashboard (3,484 lines)
+                served by adapters/web.py at /dashboard
 ```
 
 **Hard rule for layer purity**: nothing in `kernel/` may import `telegram`, `discord`, `slack_bolt`, etc. Platform SDKs only live in `adapters/`. Action handlers (`actions/`) call `ctx.adapter.send_text()` / `send_photo()` etc. — never `import telegram` directly.
@@ -34,6 +38,8 @@ app.py        — single entry point; wires everything
 | A new slash command (`/foo`) | `actions/<topic>.py` exporting `register(dispatcher)` |
 | A new chat platform | `adapters/<name>.py` subclassing `kernel.ChatAdapter` (14 abstract methods) |
 | A new platform-agnostic capability (Claude pipeline tweak, scheduler, store) | `kernel/<module>.py` |
+| A new dashboard API endpoint | `adapters/web.py:_api_*` method + corresponding route in `start()` |
+| A new dashboard UI tab | `webapp/index.html` — keep changes minimal, the file is one giant HTML/CSS/JS document; commit only what you actually change |
 | A new persistent state file | `kernel/store.py` for KV; or its own JSON file with `Path` constants in the relevant module; **always add to `.gitignore`** |
 | A new test | `tests/test_all.py` — a new section with `expect(...)` assertions |
 | Per-platform setup docs | `docs/setup/<platform>.md` |

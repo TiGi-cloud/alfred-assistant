@@ -149,8 +149,13 @@ These get auto-created next to `app.py`:
 | `alfred_projects.json` | Per-user named projects |
 | `alfred_scheduler.json` | Reminders, schedules, alerts |
 | `alfred_notifications.json` | Per-chat notifications-on toggle |
+| `alfred_metrics.json` | CPU / memory / disk samples (last 24h, dashboard sparklines) |
 | `claude_sessions.json` | Active Claude session per chat |
 | `claude_forks.json` | Named conversation branches |
 | `claude_usage.json` | Token-usage history |
 
 All gitignored. Back them up if you care about the state.
+
+## Dashboard
+
+`http://localhost:8765/dashboard?token=…` — live Mac status (CPU / memory / disk gauges, 60-min sparklines), schedules, alerts, machines, cost, command palette. Same `WEB_AUTH_TOKEN` as the chat. See [setup/dashboard.md](setup/dashboard.md) for browser walk-through and Telegram Mini App setup.

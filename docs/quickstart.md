@@ -46,8 +46,11 @@ You'll see something like:
 
 ```
 🎩 Web chat:   http://127.0.0.1:8765/?token=…
+   Dashboard:  http://127.0.0.1:8765/dashboard?token=…
 00:00:00 INFO  alfred.adapters.telegram — Telegram adapter started
 ```
+
+The **dashboard** URL is the live system view (CPU/memory/disk gauges, sparklines, schedules, alerts). Same URL also embeds in Telegram as a Mini App if you set up a tunnel — see [setup/dashboard.md](setup/dashboard.md).
 
 ## 4. Try it
 

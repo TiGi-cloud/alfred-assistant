@@ -2,7 +2,13 @@
 
 The fastest path to "Alfred working" — no external account needed.
 
-The web adapter is just an aiohttp server bound to `127.0.0.1` that serves a chat HTML page and a WebSocket. The setup wizard auto-generates an auth token and embeds it in the URL.
+The web adapter is an aiohttp server bound to `127.0.0.1` that serves three things:
+
+- `/` — the chat UI (this page)
+- `/dashboard` — the Mini App dashboard with live gauges + sparklines (see [dashboard.md](dashboard.md))
+- `/api/*` — JSON endpoints powering the dashboard
+
+The setup wizard auto-generates an auth token and embeds it in the URLs.
 
 ## 1. Enable in the wizard
 

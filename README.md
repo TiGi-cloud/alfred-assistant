@@ -36,6 +36,8 @@ Alfred: 📸 [photo arrives in chat]
 
 Alfred wraps the [Claude Code](https://claude.com/claude-code) CLI and surfaces it through five chat platforms with one shared brain — Telegram, Discord, Slack, iMessage, and a local browser chat. Same conversation memory wherever you address him. He inherits Claude Code's full agentic toolset (Bash, FileSystem, MCP servers, web fetch, …) so anything you can type at a terminal, you can ask Alfred to do over text.
 
+A **dashboard Mini App** rides along — live CPU / memory / disk gauges, 60-minute sparklines, schedules, alerts, machines, cost, and a command palette. Embeds in Telegram via Cloudflare Tunnel, or open at `localhost:8765/dashboard` in any browser.
+
 Mac-native by design: Vision OCR for photos you send him, AppleScript for app control, iMessage via `chat.db`, macOS Notification Center forwarding — all built in.
 
 > ⚠️ **Self-hosted only.** Alfred runs shell commands on the host with no sandbox. **Do not host this for other people.** Each person should run their own Alfred on their own Mac.
@@ -113,6 +115,7 @@ Run any combination at once.
 | 📧 Mail | `/gmail` (Mail.app or IMAP) |
 | 🌍 Browser | `/web` + `[BROWSE:url]` (headless Chromium via Playwright) |
 | 🎩 UI | `/start` `/menu` (tappable button grid) |
+| 📊 Dashboard | live system gauges + 60-min sparklines + cost + schedules at `/dashboard` (also a Telegram Mini App) |
 
 Plus: anything you say in plain text goes to Claude, which has full shell access.
 

@@ -4,6 +4,10 @@
 
 Named after Alfred Pennyworth — Batman's butler. The character does the work and stays out of the spotlight; the brand cues the bot to do the same. Brief, useful, no theatre.
 
+## What's the dashboard?
+
+A web view of your Mac's health and Alfred's state — CPU / memory / disk gauges, 60-minute sparklines, token cost, active schedules / alerts / machines, command palette. Lives at `http://localhost:8765/dashboard?token=…` (printed on startup). Also embeds in Telegram as a Mini App if you set up an HTTPS tunnel — see [setup/dashboard.md](setup/dashboard.md).
+
 ## Why another self-hosted Claude bot?
 
 Alfred is **Mac-first** and runs **through the Claude Code CLI**, not the Anthropic API.

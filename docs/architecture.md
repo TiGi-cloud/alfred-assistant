@@ -43,6 +43,8 @@ Everything platform-agnostic. Adapters depend on this; this depends on nothing i
 | `projects.py` | `ProjectRegistry` — per-user named projects (cwd + env + model); ClaudeRunner reads this |
 | `browser.py` | `BrowserPool` — Playwright Chromium; one shared browser, one context per chat |
 | `store.py` | SQLite KV (`db_load`/`db_save`) + persistent memory functions |
+| `metrics.py` | `MetricsCollector` — async polling of Mac CPU/memory/disk every 60s, persisted to `alfred_metrics.json`; powers the dashboard's sparklines |
+| `branding.py` | Single source of truth for the logo + accent colors |
 
 Hard rule: **nothing in `kernel/` may `import telegram`, `discord`, `slack_bolt`, or any other platform SDK.** If you find yourself wanting to, the right place is `adapters/`.
 
@@ -53,7 +55,7 @@ One module per chat platform. Each implements `kernel.ChatAdapter`. Translates p
 | File | Library | Notes |
 |---|---|---|
 | `telegram.py` | `python-telegram-bot` | required core dep |
-| `web.py` | `aiohttp` | inline-HTML chat at `localhost:8765` |
+| `web.py` | `aiohttp` | three things: inline chat HTML at `/`, dashboard Mini App at `/dashboard`, JSON API at `/api/*` powering the dashboard |
 | `discord.py` | `discord.py` (optional) | DMs + servers |
 | `slack.py` | `slack-bolt` (optional) | Socket Mode, no public URL needed |
 | `imessage.py` | stdlib | macOS-only; reads `chat.db`, sends via AppleScript |
@@ -88,7 +90,7 @@ The handler receives a `Context`. It calls `ctx.adapter.send_text(...)` etc. —
 
 ## Layer 0: app.py
 
-Single entry point. ~250 lines. Builds adapters from env vars, wires them into the dispatcher + scheduler + project + machine + notification registries, starts everything, blocks on SIGINT, shuts down cleanly.
+Single entry point. ~270 lines. Builds adapters from env vars, wires them into the dispatcher + scheduler + project + machine + notification + metrics registries, starts everything, blocks on SIGINT, shuts down cleanly.
 
 ```
 adapters → dispatcher → actions
@@ -96,9 +98,12 @@ adapters → dispatcher → actions
         ClaudeRunner ← projects + memory
                 ↓
             Scheduler → adapters (out-of-band fire)
+            MetricsCollector → WebAdapter (/api/metrics)
         BrowserPool
         NotificationWatcher
 ```
+
+The WebAdapter is wired with optional refs to `claude_runner`, `scheduler`, `machines_registry`, `metrics_collector`, and `dispatcher`, so its `/api/*` endpoints can read kernel state for the dashboard. Without these refs the adapter still serves chat — the dashboard endpoints just degrade to empty / stub responses.
 
 ## Data flow: a typical message
 
@@ -125,6 +130,7 @@ Same flow for every platform. The dispatcher fans out across all adapters concur
 | `alfred_machines.json` | `MachineRegistry` | SSH targets + active per user |
 | `alfred_projects.json` | `ProjectRegistry` | named projects + active per user |
 | `alfred_notifications.json` | `NotificationWatcher` | toggle state per chat |
+| `alfred_metrics.json` | `MetricsCollector` | last 1440 CPU/memory/disk samples (24h at 1m) |
 
 All gitignored. Live next to `app.py` by default; pass explicit `state_path=Path(...)` to override (used by tests).
 
