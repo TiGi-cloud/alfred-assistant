@@ -25,6 +25,14 @@ Alfred Pennyworth is Batman's butler. He drives the car, hacks the computers, bu
 
 That's the brief. **Alfred is the assistant — not the protagonist.** No personality theatre, no "let me think about that" filler. You ask, Alfred does, you go on with your day. The bot's name is the thesis statement.
 
+## Demo
+
+<p align="center">
+  <img src="docs/assets/screenshots/demo.gif" alt="Alfred demo — three turns of chat" width="600">
+</p>
+
+<sub>20 seconds. Three turns: screenshot, app list, cost. Same brain runs in Telegram, Discord, Slack, iMessage. (Demo screenshot is a mock desktop — the real bot returns your actual Mac.)</sub>
+
 ## What he does
 
 ```
