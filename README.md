@@ -10,6 +10,13 @@
   Telegram · Discord · Slack · iMessage · Web.
 </p>
 
+<p align="center">
+  <a href="https://github.com/TiGi-cloud/alfred-assistant/actions/workflows/ci.yml"><img src="https://github.com/TiGi-cloud/alfred-assistant/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+"></a>
+  <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-first--class-lightgrey.svg" alt="macOS first-class"></a>
+</p>
+
 ---
 
 ## Why "Alfred"
@@ -106,14 +113,16 @@ If you live on a Mac and want the deepest Claude Code integration, that's Alfred
 
 | Doc | Audience |
 |---|---|
-| [quickstart.md](docs/quickstart.md) | First 5 minutes |
-| [commands.md](docs/commands.md) | Every command, with examples |
-| [setup/](docs/setup/) | Per-platform getting started |
-| [security.md](docs/security.md) | Auth model, attack surface, what to be careful about |
-| [architecture.md](docs/architecture.md) | kernel + adapters + actions, for contributors |
-| [plugins.md](docs/plugins.md) | Write your own command |
-| [troubleshooting.md](docs/troubleshooting.md) | When something doesn't work |
-| [faq.md](docs/faq.md) | Common questions |
+| [quickstart.md](docs/quickstart.md) | Users — first 5 minutes |
+| [commands.md](docs/commands.md) | Users — every command, with examples |
+| [setup/](docs/setup/) | Users — per-platform getting started |
+| [security.md](docs/security.md) | Users — auth model, attack surface |
+| [troubleshooting.md](docs/troubleshooting.md) | Users — when something doesn't work |
+| [faq.md](docs/faq.md) | Users — common questions |
+| [architecture.md](docs/architecture.md) | Developers — kernel + adapters + actions, with diagrams |
+| [plugins.md](docs/plugins.md) | Developers — write your own slash command |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Developers — workflow, style, what's welcome |
+| [AGENTS.md](AGENTS.md) | AI agents — codebase rules + voice for Claude Code, Cursor, Codex, Aider, etc. |
 
 ## Stack
 

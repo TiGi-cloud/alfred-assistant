@@ -89,9 +89,10 @@ async def cmd_notifications(ctx: Context) -> None:
         _save_state(state)
         if not _find_db():
             await ctx.reply(
-                "📱 Enabled, but I can't find the macOS Notification Center "
-                "database — your macOS version may use a path I don't know about. "
-                "Notifications won't be forwarded."
+                "📱 Notifications: ON — but I can't find the macOS Notification "
+                "Center database, so nothing will actually be forwarded. "
+                "(Either you're not on macOS, or your version uses a path I "
+                "don't know about.)"
             )
         else:
             await ctx.reply("📱 Notifications: ON — I'll forward macOS alerts here.")
